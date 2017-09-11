@@ -37,13 +37,13 @@ type controllerRequest struct {
 type Controller struct {
 	DevicePath string // Path USB serial device
 
-	serial           *serial.Port
-	responses        chan *packet.Packet
-	requests         chan *controllerRequest
-	stopResponses    chan int
-	stopRequests     chan int
-	stoppedResponses chan int
-	stoppedRequests  chan int
+	serial           *serial.Port            // Serial port connection
+	responses        chan *packet.Packet     // Channel for packets read from serial
+	requests         chan *controllerRequest // Channel for outgoing requests
+	stopResponses    chan int                // Exit signal channel for doResponses
+	stopRequests     chan int                // Exit signal channel for doRequests
+	stoppedResponses chan int                // Exit confirmation channel for doResponses
+	stoppedRequests  chan int                // Exit confirmation channel for doRequests
 }
 
 // Maximum number of request send errors to retry
@@ -184,6 +184,7 @@ func (controller *Controller) doRequests() {
 				log.Printf("ERROR doRequests request Bytes() error: %v", reqErr)
 				request.Err = errors.New(fmt.Sprintf("Failed to Bytes() packet: %v", reqErr))
 				request.Chan <- 0
+				break
 			}
 			requestBytes = append(requestBytes, '\n')
 
@@ -210,7 +211,7 @@ func (controller *Controller) doRequests() {
 					case packet.PacketPreambleCAN:
 						// Recieved a message while trying to send ours - not
 						// an error. If we have lots of nodes, this could be
-						// requent,so don't count this as an error
+						// frequent, so don't count this as an error
 						log.Printf("ERROR doRequests request got unexpected CAN")
 
 					case packet.PacketPreambleACK:
@@ -386,10 +387,17 @@ func (controller *Controller) Close() error {
 		return nil
 	}
 
-	controller.stopRequests <- 0
-	<-controller.stoppedRequests
-	controller.stopResponses <- 0
-	<-controller.stoppedResponses
+	// Handle double close with controller.serial.Close error
+	if controller.stopRequests != nil {
+
+		controller.stopRequests <- 0
+		<-controller.stoppedRequests
+
+		controller.stopResponses <- 0
+		<-controller.stoppedResponses
+
+		controller.stopRequests = nil
+	}
 
 	if err := controller.serial.Close(); err != nil {
 		return err
