@@ -1,4 +1,4 @@
-// ZWave Packet parsing and serialization
+// Package packet parses and serializes ZWave packets from/to binary bytes
 package packet
 
 /*
@@ -18,7 +18,6 @@ limitations under the License.
 */
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -36,7 +35,7 @@ const (
 	PacketTypeResponse uint8 = 0x01
 )
 
-// Packet
+// Packet representation
 type Packet struct {
 	Preamble    uint8
 	Length      uint8
@@ -46,8 +45,8 @@ type Packet struct {
 	Checksum    uint8
 }
 
-// A PacketParser instance
-type PacketParser struct {
+// Parser state
+type Parser struct {
 	state  packetParseState
 	packet *Packet
 }
@@ -69,7 +68,7 @@ func (packet *Packet) String() string {
 	return fmt.Sprintf("%+v", *packet)
 }
 
-// Serialize Packet to []byte representation. Runs Update() before returning
+// Bytes runs Update() and returns the binary serialization of the packet.
 func (packet *Packet) Bytes() ([]byte, error) {
 	if err := packet.Update(); err != nil {
 		return nil, err
@@ -91,7 +90,7 @@ func (packet *Packet) Bytes() ([]byte, error) {
 	return bytes, nil
 }
 
-// Set the length and checksum of the packet based on the other fields.
+// Update the length and checksum of the packet based on the other fields.
 // Errors if body is too long.
 func (packet *Packet) Update() error {
 	// These don't have a length nor checksum
@@ -101,8 +100,7 @@ func (packet *Packet) Update() error {
 	}
 
 	if len(packet.Body) > 0xff-3 {
-		return errors.New(fmt.Sprintf("Packet Body is too long: %d > %d",
-			len(packet.Body), 0xff-3))
+		return fmt.Errorf("Packet Body is too long: %d > %d", len(packet.Body), 0xff-3)
 	}
 
 	// Minimum length
@@ -126,7 +124,7 @@ func (packet *Packet) Update() error {
 // Parse a byte. If finished parsing a Packet, then Packet return is non nil.
 // Resets internal state on error and should eventually again return a valid
 // packet.
-func (parser *PacketParser) Parse(b uint8) (*Packet, error) {
+func (parser *Parser) Parse(b uint8) (*Packet, error) {
 	var p *Packet
 	var e error
 
@@ -143,13 +141,13 @@ func (parser *PacketParser) Parse(b uint8) (*Packet, error) {
 			parser.state = packetParseStateLength
 
 		default:
-			e = errors.New(fmt.Sprintf("Bad preamble: %d", b))
+			e = fmt.Errorf("Bad preamble: %d", b)
 			goto reset
 		}
 
 	case packetParseStateLength:
 		if b < 3 {
-			e = errors.New(fmt.Sprintf("Bad length: %d", b))
+			e = fmt.Errorf("Bad length: %d", b)
 			goto reset
 		}
 		parser.packet.Length = b
@@ -157,7 +155,7 @@ func (parser *PacketParser) Parse(b uint8) (*Packet, error) {
 
 	case packetParseStatePacketType:
 		if b != PacketTypeRequest && b != PacketTypeResponse {
-			e = errors.New(fmt.Sprintf("Bad PacketType: %d", b))
+			e = fmt.Errorf("Bad PacketType: %d", b)
 			goto reset
 		}
 
@@ -186,20 +184,19 @@ func (parser *PacketParser) Parse(b uint8) (*Packet, error) {
 	case packetParseStateChecksum:
 		// NOTE: this should be unreachable
 		if err := parser.packet.Update(); err != nil {
-			e = errors.New(fmt.Sprintf("Failed to compute checksum: %v %v",
-				parser.packet, err))
+			e = fmt.Errorf("Failed to compute checksum: %v %v", parser.packet, err)
 			goto reset
 		}
 
 		if parser.packet.Checksum == b {
 			p = parser.packet
 		} else {
-			e = errors.New(fmt.Sprintf("Failed to validate checksum: %v", parser.packet))
+			e = fmt.Errorf("Failed to validate checksum: %v", parser.packet)
 		}
 		goto reset
 
 	default:
-		e = errors.New(fmt.Sprintf("Invalid internal state: %d", parser.state))
+		e = fmt.Errorf("Invalid internal state: %d", parser.state)
 		goto reset
 	}
 

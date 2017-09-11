@@ -23,7 +23,7 @@ import (
 )
 
 func TestPacket(t *testing.T) {
-	parser := PacketParser{}
+	parser := Parser{}
 
 	// Test single byte packets
 	singlePacketBytes := []uint8{PacketPreambleACK, PacketPreambleNAK, PacketPreambleCAN}

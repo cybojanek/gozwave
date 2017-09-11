@@ -1,4 +1,4 @@
-// ZWave Packet to Message Processing
+// Package message converts Packets to higher level ZWave application messages
 package message
 
 /*
@@ -18,7 +18,6 @@ limitations under the License.
 */
 
 import (
-	"errors"
 	"fmt"
 )
 
@@ -66,6 +65,7 @@ const (
 	TransmitCompleteNoRoute       = 0x04
 )
 
+// SerialAPIGetInitData information
 type SerialAPIGetInitData struct {
 	Version      uint8
 	Capabilities struct {
@@ -75,6 +75,7 @@ type SerialAPIGetInitData struct {
 	Nodes []uint8 // List of nodes on the network
 }
 
+// SerialAPIGetCapabilities information
 type SerialAPIGetCapabilities struct {
 	Version      uint16
 	Manufacturer uint16
@@ -85,6 +86,7 @@ type SerialAPIGetCapabilities struct {
 	MessageTypes []uint8 // List of supported Message Types
 }
 
+// ZWGetControllerCapabilities information
 type ZWGetControllerCapabilities struct {
 	Secondary                      bool
 	NonStandardHomeID              bool
@@ -93,6 +95,7 @@ type ZWGetControllerCapabilities struct {
 	StaticUpdateController         bool
 }
 
+// ZWSendData information
 type ZWSendData struct {
 	NodeID          uint8
 	CommandClass    uint8
@@ -107,12 +110,14 @@ type ZWSendData struct {
 	CallbackID uint8
 }
 
+// SetTransmitOptionsMask takes the options byte and sets the individual bool
+// flags of ZWSendData.TransmitOptions
 func (message *ZWSendData) SetTransmitOptionsMask(options uint8) error {
 	fullMask := (TransmitOptionACK | TransmitOptionLowPower |
 		TransmitOptionAutoRoute | TransmitOptionNoRoute | TransmitOptionExplore)
 
 	if (fullMask & options) != options {
-		return errors.New(fmt.Sprintf("Options contains unknown bits: 0x%02x", options))
+		return fmt.Errorf("Options contains unknown bits: 0x%02x", options)
 	}
 
 	message.TransmitOptions.ACK = (options & TransmitOptionACK) != 0

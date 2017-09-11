@@ -1,4 +1,4 @@
-// ZWave USB Serial Controller
+// Package controller reads and writes packets to a ZWave USB Serial Controller
 package controller
 
 /*
@@ -34,6 +34,7 @@ type controllerRequest struct {
 	Chan     chan int       // Channel to notify on request completion
 }
 
+// Controller information and state
 type Controller struct {
 	DevicePath string // Path USB serial device
 
@@ -69,12 +70,12 @@ func (controller *Controller) writeFully(b []byte) error {
 
 	written := 0
 	for written < len(b) {
-		if n, err := controller.serial.Write(b[written:]); err != nil {
+		n, err := controller.serial.Write(b[written:])
+		if err != nil {
 			log.Printf("ERROR writeFully error: %v", err)
 			return err
-		} else {
-			written += n
 		}
+		written += n
 	}
 
 	log.Printf("DEBUG writeFully EXIT")
@@ -87,12 +88,12 @@ func (controller *Controller) readFully(b []byte) error {
 
 	read := 0
 	for read < len(b) {
-		if n, err := controller.serial.Read(b[read:]); err != nil {
+		n, err := controller.serial.Read(b[read:])
+		if err != nil {
 			log.Printf("ERROR readFully error: %v", err)
 			return err
-		} else {
-			read += n
 		}
+		read += n
 	}
 
 	log.Printf("DEBUG readFully EXIT: %v", b)
@@ -102,7 +103,7 @@ func (controller *Controller) readFully(b []byte) error {
 // Read from serial device and forward parsed packets to controller.responses
 func (controller *Controller) doResponses() {
 	// Parser and buffer
-	parser := packet.PacketParser{}
+	parser := packet.Parser{}
 	buffer := make([]byte, 512)
 
 	for {
@@ -182,7 +183,7 @@ func (controller *Controller) doRequests() {
 			requestBytes, reqErr := request.Request.Bytes()
 			if reqErr != nil {
 				log.Printf("ERROR doRequests request Bytes() error: %v", reqErr)
-				request.Err = errors.New(fmt.Sprintf("Failed to Bytes() packet: %v", reqErr))
+				request.Err = fmt.Errorf("Failed to Bytes() packet: %v", reqErr)
 				request.Chan <- 0
 				break
 			}
@@ -319,7 +320,7 @@ func (controller *Controller) doRequests() {
 	}
 }
 
-// Send a request and await a response
+// BlockingRequest issues a request and awaits a response
 func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.Packet, error) {
 	log.Printf("DEBUG BlockingRequest(%v)", request)
 
@@ -328,13 +329,13 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	}
 
 	if request.Preamble != packet.PacketPreambleSOF {
-		return nil, errors.New(fmt.Sprintf("Packet has non SOF Preamble: 0x%02x",
-			request.Preamble))
+		return nil, fmt.Errorf("Packet has non SOF Preamble: 0x%02x",
+			request.Preamble)
 	}
 
 	if request.PacketType != packet.PacketTypeRequest {
-		return nil, errors.New(fmt.Sprintf("Packet has non Request Packet Type: 0x%02x",
-			request.PacketType))
+		return nil, fmt.Errorf("Packet has non Request Packet Type: 0x%02x",
+			request.PacketType)
 	}
 
 	// Send request
@@ -347,7 +348,7 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	return controllerRequest.Response, controllerRequest.Err
 }
 
-// Check if Controller is open
+// IsOpen checks if Controller is open
 func (controller *Controller) IsOpen() bool {
 	return controller.serial != nil
 }
@@ -361,11 +362,12 @@ func (controller *Controller) Open() error {
 	// rtscts True, dsrdtr True
 	c := &serial.Config{Name: controller.DevicePath, Baud: 115200,
 		ReadTimeout: serialPortReadTimeout}
-	if s, err := serial.OpenPort(c); err != nil {
+
+	s, err := serial.OpenPort(c)
+	if err != nil {
 		return err
-	} else {
-		controller.serial = s
 	}
+	controller.serial = s
 
 	controller.serial.Flush()
 

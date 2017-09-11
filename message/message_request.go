@@ -21,7 +21,7 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
-// Create a request for SerialAPIGetInitData
+// SerialAPIGetInitDataRequest creates a SerialAPIGetInitData request packet
 func SerialAPIGetInitDataRequest() *packet.Packet {
 	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
 		PacketType:  packet.PacketTypeRequest,
@@ -34,7 +34,8 @@ func SerialAPIGetInitDataRequest() *packet.Packet {
 	return &p
 }
 
-// Create a request for SerialAPIGetCapabilities
+// SerialAPIGetCapabilitiesRequest creates a  SerialAPIGetCapabilities request
+// packet
 func SerialAPIGetCapabilitiesRequest() *packet.Packet {
 	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
 		PacketType:  packet.PacketTypeRequest,
@@ -47,7 +48,8 @@ func SerialAPIGetCapabilitiesRequest() *packet.Packet {
 	return &p
 }
 
-// Create a request for ZWGetControllerCapabilities
+// ZWGetControllerCapabilitiesRequest creates a ZWGetControllerCapabilities
+// request packet
 func ZWGetControllerCapabilitiesRequest() *packet.Packet {
 	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
 		PacketType:  packet.PacketTypeRequest,
@@ -60,7 +62,7 @@ func ZWGetControllerCapabilitiesRequest() *packet.Packet {
 	return &p
 }
 
-// Create a request for ZWSendData Get
+// ZWSendDataGetRequest creates a ZWSendData Get request packet
 func ZWSendDataGetRequest(nodeID uint8, transmitOptions uint8, callbackID uint8) (*packet.Packet, error) {
 
 	message := ZWSendData{}
@@ -75,7 +77,7 @@ func ZWSendDataGetRequest(nodeID uint8, transmitOptions uint8, callbackID uint8)
 	return ZWSendDataToRequestPacket(&message)
 }
 
-// Create a request for ZWSendData Set
+// ZWSendDataSetRequest creates a ZWSendData Set request packet
 func ZWSendDataSetRequest(nodeID uint8, value uint8, transmitOptions uint8, callbackID uint8) (*packet.Packet, error) {
 
 	message := ZWSendData{}
@@ -90,7 +92,7 @@ func ZWSendDataSetRequest(nodeID uint8, value uint8, transmitOptions uint8, call
 	return ZWSendDataToRequestPacket(&message)
 }
 
-// Create a request for ZWSendData
+// ZWSendDataToRequestPacket creates a ZWSendData request packet
 func ZWSendDataToRequestPacket(message *ZWSendData) (*packet.Packet, error) {
 	p := packet.Packet{}
 	p.Preamble = packet.PacketPreambleSOF

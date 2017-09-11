@@ -23,13 +23,14 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
+// ZWAPI instance
 type ZWAPI struct {
 	DevicePath string
 
 	con *controller.Controller
 }
 
-// Check if api is open
+// IsOpen checks if the API is open and initialized
 func (api *ZWAPI) IsOpen() bool {
 	return api.con != nil
 }
@@ -71,29 +72,33 @@ func (api *ZWAPI) blockingRequest(request *packet.Packet) (*packet.Packet, error
 	return api.con.BlockingRequest(request)
 }
 
+// SerialAPIGetInitData gets the message.SerialAPIGetInitData information
 func (api *ZWAPI) SerialAPIGetInitData() (*message.SerialAPIGetInitData, error) {
 	requestPacket := message.SerialAPIGetInitDataRequest()
-	if responsePacket, err := api.blockingRequest(requestPacket); err != nil {
+	responsePacket, err := api.blockingRequest(requestPacket)
+	if err != nil {
 		return nil, err
-	} else {
-		return message.SerialAPIGetInitDataResponse(responsePacket)
 	}
+	return message.SerialAPIGetInitDataResponse(responsePacket)
 }
 
+// SerialAPIGetCapabilities gets the message.SerialAPIGetCapabilities information
 func (api *ZWAPI) SerialAPIGetCapabilities() (*message.SerialAPIGetCapabilities, error) {
 	requestPacket := message.SerialAPIGetCapabilitiesRequest()
-	if responsePacket, err := api.blockingRequest(requestPacket); err != nil {
+	responsePacket, err := api.blockingRequest(requestPacket)
+	if err != nil {
 		return nil, err
-	} else {
-		return message.SerialAPIGetCapabilitiesResponse(responsePacket)
 	}
+	return message.SerialAPIGetCapabilitiesResponse(responsePacket)
 }
 
+// ZWGetControllerCapabilities gets the message.ZWGetControllerCapabilities
+// information
 func (api *ZWAPI) ZWGetControllerCapabilities() (*message.ZWGetControllerCapabilities, error) {
 	requestPacket := message.ZWGetControllerCapabilitiesRequest()
-	if responsePacket, err := api.blockingRequest(requestPacket); err != nil {
+	responsePacket, err := api.blockingRequest(requestPacket)
+	if err != nil {
 		return nil, err
-	} else {
-		return message.ZWGetControllerCapabilitiesResponse(responsePacket)
 	}
+	return message.ZWGetControllerCapabilitiesResponse(responsePacket)
 }

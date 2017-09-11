@@ -24,7 +24,7 @@ import (
 
 // Parse bytes into a packet
 func parsePacketBytes(t *testing.T, bytes []byte) *packet.Packet {
-	parser := packet.PacketParser{}
+	parser := packet.Parser{}
 	for i, x := range bytes {
 		p, err := parser.Parse(x)
 		if i != len(bytes)-1 {
@@ -129,20 +129,20 @@ func TestSerialAPIGetInitDataResponse(t *testing.T) {
 	packet.Body = packet.Body[0 : len(packet.Body)+1]
 
 	// Bad Bitmap length
-	packet.Body[2] += 1
+	packet.Body[2]++
 	message, err = SerialAPIGetInitDataResponse(packet)
 	if message != nil || err == nil {
 		t.Errorf("Expected nil message and non nil error: %v %v", message, err)
 	}
-	packet.Body[2] -= 1
+	packet.Body[2]--
 
 	// Bad MessageType
-	packet.MessageType += 1
+	packet.MessageType++
 	message, err = SerialAPIGetInitDataResponse(packet)
 	if message != nil || err == nil {
 		t.Errorf("Expected nil message and non nil error: %v %v", message, err)
 	}
-	packet.MessageType -= 1
+	packet.MessageType--
 }
 
 func TestSerialAPIGetCapabilitiesResponse(t *testing.T) {
@@ -188,12 +188,12 @@ func TestSerialAPIGetCapabilitiesResponse(t *testing.T) {
 	packet.Body[len(packet.Body)-1] &= (0xff ^ 0x80)
 
 	// Bad MessageType
-	packet.MessageType += 1
+	packet.MessageType++
 	message, err = SerialAPIGetCapabilitiesResponse(packet)
 	if message != nil || err == nil {
 		t.Errorf("Expected nil message and non nil error: %v %v", message, err)
 	}
-	packet.MessageType -= 1
+	packet.MessageType--
 
 	// Bad BodyLength
 	packet.Body = packet.Body[0 : len(packet.Body)-1]
@@ -215,7 +215,7 @@ func TestZWGetControllerCapabilitiesResponse(t *testing.T) {
 	}
 
 	// Test capabilities
-	compatibility_bytes := []uint8{0x0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x12, 0x14, 0x18, 0x6}
+	compatibilityBytes := []uint8{0x0, 0x1, 0x2, 0x4, 0x8, 0x10, 0x12, 0x14, 0x18, 0x6}
 	compatibilities := [][5]bool{{false, false, false, false, false},
 		{true, false, false, false, false},
 		{false, true, false, false, false},
@@ -227,7 +227,7 @@ func TestZWGetControllerCapabilitiesResponse(t *testing.T) {
 		{false, false, false, true, true},
 		{false, true, true, false, false}}
 
-	for i, b := range compatibility_bytes {
+	for i, b := range compatibilityBytes {
 		packet.Body[0] = b
 		message, err = ZWGetControllerCapabilitiesResponse(packet)
 		if message == nil || err != nil {
@@ -245,12 +245,12 @@ func TestZWGetControllerCapabilitiesResponse(t *testing.T) {
 	}
 
 	// Bad MessageType
-	packet.MessageType += 1
+	packet.MessageType++
 	message, err = ZWGetControllerCapabilitiesResponse(packet)
 	if message != nil || err == nil {
 		t.Errorf("Expected nil message and non nil error: %v %v", message, err)
 	}
-	packet.MessageType -= 1
+	packet.MessageType--
 
 	// Bad BodyLength
 	packet.Body = packet.Body[0 : len(packet.Body)-1]

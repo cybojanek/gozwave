@@ -23,14 +23,15 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
-// Convert a Packet to a SerialAPIGetCapabilities message
+// SerialAPIGetCapabilitiesResponse parses a SerialAPIGetCapabilities response
+// packet
 func SerialAPIGetCapabilitiesResponse(p *packet.Packet) (*SerialAPIGetCapabilities, error) {
 	if p.MessageType != MessageTypeSerialAPIGetCapabilities {
-		return nil, errors.New(fmt.Sprintf("Bad MessageType: %d", p.MessageType))
+		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
 	if len(p.Body) != 40 {
-		return nil, errors.New(fmt.Sprintf("Bad Body length: %d", len(p.Body)))
+		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
 	}
 
 	message := SerialAPIGetCapabilities{}
@@ -55,14 +56,14 @@ func SerialAPIGetCapabilitiesResponse(p *packet.Packet) (*SerialAPIGetCapabiliti
 	return &message, nil
 }
 
-// Convert a Packet to a SerialAPIGetInitData message
+// SerialAPIGetInitDataResponse parses a SerialAPIGetInitData response packet
 func SerialAPIGetInitDataResponse(p *packet.Packet) (*SerialAPIGetInitData, error) {
 	if p.MessageType != MessageTypeSerialAPIGetInitdata {
-		return nil, errors.New(fmt.Sprintf("Bad MessageType: %d", p.MessageType))
+		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
 	if len(p.Body) != 34 {
-		return nil, errors.New(fmt.Sprintf("Bad Body length: %d", len(p.Body)))
+		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
 	}
 
 	message := SerialAPIGetInitData{}
@@ -74,7 +75,7 @@ func SerialAPIGetInitDataResponse(p *packet.Packet) (*SerialAPIGetInitData, erro
 
 	// Should be 29 for 29 * 8 = 232 bits / node ids
 	if p.Body[2] != 29 {
-		return nil, errors.New(fmt.Sprintf("Bad bitmap byte length: %d", p.Body[2]))
+		return nil, fmt.Errorf("Bad bitmap byte length: %d", p.Body[2])
 	}
 
 	for i, x := range p.Body[3 : 3+29] {
@@ -90,14 +91,15 @@ func SerialAPIGetInitDataResponse(p *packet.Packet) (*SerialAPIGetInitData, erro
 	return &message, nil
 }
 
-// Convert a Packet to a ZWGetControllerCapabilities message
+// ZWGetControllerCapabilitiesResponse parses a ZWGetControllerCapabilities
+// response packet
 func ZWGetControllerCapabilitiesResponse(p *packet.Packet) (*ZWGetControllerCapabilities, error) {
 	if p.MessageType != MessageTypeZWGetControllerCapabilities {
-		return nil, errors.New(fmt.Sprintf("Bad MessageType: %d", p.MessageType))
+		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
 	if len(p.Body) != 1 {
-		return nil, errors.New(fmt.Sprintf("Bad Body length: %d", len(p.Body)))
+		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
 	}
 
 	message := ZWGetControllerCapabilities{}
