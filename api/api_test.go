@@ -26,6 +26,10 @@ const testDevicePath = "/dev/tty.usbmodem1451"
 func TestAPI(t *testing.T) {
 	api := ZWAPI{DevicePath: testDevicePath}
 
+	if testing.Short() {
+		t.Skipf("Skipping API test")
+	}
+
 	if err := api.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 		t.FailNow()

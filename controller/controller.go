@@ -265,6 +265,7 @@ func (controller *Controller) doRequests() {
 
 						if request.Request.MessageType == response.MessageType {
 							// TODO: is this always true?
+							log.Printf("DEBUG doRequests request reponse %v", response)
 							request.Response = response
 							gotResponse = true
 							request.Chan <- 0

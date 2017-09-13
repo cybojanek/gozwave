@@ -28,6 +28,10 @@ const testDevicePath = "/dev/tty.usbmodem1451"
 func TestControllerOpenClose(t *testing.T) {
 	controller := Controller{DevicePath: testDevicePath}
 
+	if testing.Short() {
+		t.Skipf("Skipping controller test")
+	}
+
 	if err := controller.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 		t.FailNow()
@@ -42,6 +46,10 @@ func TestControllerOpenClose(t *testing.T) {
 
 func TestController(t *testing.T) {
 	controller := Controller{DevicePath: testDevicePath}
+
+	if testing.Short() {
+		t.Skipf("Skipping controller test")
+	}
 
 	if err := controller.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
@@ -68,6 +76,10 @@ func TestController(t *testing.T) {
 
 func TestControllerMessage(t *testing.T) {
 	controller := Controller{DevicePath: testDevicePath}
+
+	if testing.Short() {
+		t.Skipf("Skipping controller test")
+	}
 
 	if err := controller.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
