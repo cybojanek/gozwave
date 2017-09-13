@@ -7,7 +7,7 @@ go:
 install:
   - go get github.com/tarm/serial
 
-script: go test -short -coverprofile=coverage.txt -covermode=atomic ./...
+script: ./test.sh
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
