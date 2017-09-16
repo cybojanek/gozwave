@@ -39,11 +39,12 @@ const (
 // Message Type
 const (
 	MessageTypeNone                        uint8 = 0x00
-	MessageTypeSerialAPIGetInitdata              = 0x02
+	MessageTypeSerialAPIGetInitData              = 0x02
 	MessageTypeApplicationCommandHandler         = 0x04
 	MessageTypeZWGetControllerCapabilities       = 0x05
 	MessageTypeSerialAPIGetCapabilities          = 0x07
 	MessageTypeZWSendData                        = 0x13
+	MessageTypeZWGetNodeProtocolInfo             = 0x41
 	MessageTypeZWApplicationUpdate               = 0x49
 )
 
@@ -83,7 +84,7 @@ type SerialAPIGetCapabilities struct {
 		Type uint16
 		ID   uint16
 	}
-	MessageTypes []uint8 // List of supported Message Types
+	MessageTypes []uint8
 }
 
 // ZWGetControllerCapabilities information
@@ -93,6 +94,18 @@ type ZWGetControllerCapabilities struct {
 	StaticUpdateControllerIDServer bool
 	WasPrimary                     bool
 	StaticUpdateController         bool
+}
+
+// ZWGetNodeProtocolInfo information
+type ZWGetNodeProtocolInfo struct {
+	Capabilities struct {
+		Listening bool
+	}
+	DeviceClass struct {
+		Basic    uint8
+		Generic  uint8
+		Specific uint8
+	}
 }
 
 // ZWSendData information
@@ -108,6 +121,11 @@ type ZWSendData struct {
 		Explore   bool
 	}
 	CallbackID uint8
+}
+
+// IsValidNodeID checks if the nodeID is in the valid range of nodes
+func IsValidNodeID(nodeID uint8) bool {
+	return nodeID > 0 && nodeID < 233
 }
 
 // SetTransmitOptionsMask takes the options byte and sets the individual bool

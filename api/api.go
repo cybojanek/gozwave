@@ -23,6 +23,11 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
+var (
+	// ErrNodeNotFound is returned in case of node not found
+	ErrNodeNotFound = errors.New("Node not found")
+)
+
 // ZWAPI instance
 type ZWAPI struct {
 	DevicePath string
@@ -101,4 +106,27 @@ func (api *ZWAPI) ZWGetControllerCapabilities() (*message.ZWGetControllerCapabil
 		return nil, err
 	}
 	return message.ZWGetControllerCapabilitiesResponse(responsePacket)
+}
+
+// ZWGetNodeProtocolInfo gets the message.ZWGetNodeProtocolInfo information
+// for a requested node
+func (api *ZWAPI) ZWGetNodeProtocolInfo(nodeID uint8) (*message.ZWGetNodeProtocolInfo, error) {
+	requestPacket, err := message.ZWGetNodeProtocolInfoRequest(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	responsePacket, err := api.blockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	responseMessage, err := message.ZWGetNodeProtocolInfoResponse(responsePacket)
+	if err != nil {
+		return responseMessage, err
+	}
+
+	// Check node exists
+	if responseMessage.DeviceClass.Generic == 0 {
+		return nil, ErrNodeNotFound
+	}
+	return responseMessage, nil
 }

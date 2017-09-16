@@ -58,7 +58,7 @@ func SerialAPIGetCapabilitiesResponse(p *packet.Packet) (*SerialAPIGetCapabiliti
 
 // SerialAPIGetInitDataResponse parses a SerialAPIGetInitData response packet
 func SerialAPIGetInitDataResponse(p *packet.Packet) (*SerialAPIGetInitData, error) {
-	if p.MessageType != MessageTypeSerialAPIGetInitdata {
+	if p.MessageType != MessageTypeSerialAPIGetInitData {
 		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
@@ -109,6 +109,27 @@ func ZWGetControllerCapabilitiesResponse(p *packet.Packet) (*ZWGetControllerCapa
 	message.StaticUpdateControllerIDServer = (capabilities & 0x4) != 0
 	message.WasPrimary = (capabilities & 0x8) != 0
 	message.StaticUpdateController = (capabilities & 0x10) != 0
+
+	return &message, nil
+}
+
+// ZWGetNodeProtocolInfoResponse parses a ZWGetNodeProtocolInfo response packet
+func ZWGetNodeProtocolInfoResponse(p *packet.Packet) (*ZWGetNodeProtocolInfo, error) {
+	if p.MessageType != MessageTypeZWGetNodeProtocolInfo {
+		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
+	}
+
+	if len(p.Body) != 6 {
+		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
+	}
+
+	message := ZWGetNodeProtocolInfo{}
+
+	message.Capabilities.Listening = (p.Body[0] & 0x80) != 0
+
+	message.DeviceClass.Basic = p.Body[3]
+	message.DeviceClass.Generic = p.Body[4]
+	message.DeviceClass.Specific = p.Body[5]
 
 	return &message, nil
 }

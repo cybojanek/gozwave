@@ -25,7 +25,7 @@ import (
 func SerialAPIGetInitDataRequest() *packet.Packet {
 	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
 		PacketType:  packet.PacketTypeRequest,
-		MessageType: MessageTypeSerialAPIGetInitdata}
+		MessageType: MessageTypeSerialAPIGetInitData}
 
 	if err := p.Update(); err != nil {
 		panic(fmt.Sprintf("This should never fail: %v", err))
@@ -60,6 +60,25 @@ func ZWGetControllerCapabilitiesRequest() *packet.Packet {
 	}
 
 	return &p
+}
+
+// ZWGetNodeProtocolInfoRequest creates a ZWGetNodeProtocolInfo
+// request packet
+func ZWGetNodeProtocolInfoRequest(nodeID uint8) (*packet.Packet, error) {
+	if !IsValidNodeID(nodeID) {
+		return nil, fmt.Errorf("Invalid nodeID: 0x%02x", nodeID)
+	}
+
+	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
+		PacketType:  packet.PacketTypeRequest,
+		MessageType: MessageTypeZWGetNodeProtocolInfo,
+		Body:        []uint8{nodeID}}
+
+	if err := p.Update(); err != nil {
+		panic(fmt.Sprintf("This should never fail: %v", err))
+	}
+
+	return &p, nil
 }
 
 // ZWSendDataGetRequest creates a ZWSendData Get request packet

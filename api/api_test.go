@@ -17,6 +17,7 @@ limitations under the License.
 */
 
 import (
+	"github.com/cybojanek/gozwave/message"
 	"testing"
 )
 
@@ -41,21 +42,45 @@ func TestAPI(t *testing.T) {
 		}
 	}()
 
-	if message, err := api.SerialAPIGetInitData(); err != nil {
+	var err error
+	var serialAPIGetInitData *message.SerialAPIGetInitData
+	var serialAPIGetCapabilities *message.SerialAPIGetCapabilities
+	var zwGetControllerCapabilities *message.ZWGetControllerCapabilities
+
+	serialAPIGetInitData, err = api.SerialAPIGetInitData()
+	if err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	} else {
-		t.Logf("SerialAPIGetInitData: %+v", message)
+		t.Logf("SerialAPIGetInitData: %+v", serialAPIGetInitData)
 	}
 
-	if message, err := api.SerialAPIGetCapabilities(); err != nil {
+	serialAPIGetCapabilities, err = api.SerialAPIGetCapabilities()
+	if err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	} else {
-		t.Logf("SerialAPIGetCapabilities: %+v", message)
+		t.Logf("SerialAPIGetCapabilities: %+v", serialAPIGetCapabilities)
 	}
 
-	if message, err := api.ZWGetControllerCapabilities(); err != nil {
+	zwGetControllerCapabilities, err = api.ZWGetControllerCapabilities()
+	if err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	} else {
-		t.Logf("ZWGetControllerCapabilities: %+v", message)
+		t.Logf("ZWGetControllerCapabilities: %+v", zwGetControllerCapabilities)
+	}
+
+	// Check existing nodes
+	for _, nodeID := range serialAPIGetInitData.Nodes {
+		if message, err := api.ZWGetNodeProtocolInfo(nodeID); err != nil {
+			t.Errorf("Expected nil error: %v", err)
+		} else {
+			t.Logf("ZWGetNodeProtocolInfo: %d, %+v", nodeID, message)
+		}
+	}
+
+	// Check non existant node
+	if message, err := api.ZWGetNodeProtocolInfo(200); err != ErrNodeNotFound {
+		t.Errorf("Expected non nil error ErrNodeNotFound: %v", err)
+	} else {
+		t.Logf("ZWGetNodeProtocolInfo: %d, %+v", 200, message)
 	}
 }
