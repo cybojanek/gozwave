@@ -188,6 +188,32 @@ func TestPacket(t *testing.T) {
 		}
 	}
 
+	// Test bad update error handling
+	goodMessage := []byte("\x01\x03\x00\x78\x84")
+	for i, b := range goodMessage {
+		if i == len(goodMessage)-1 {
+			// Corrupt packet to trigger update error
+			for x := 0; x < 0xff; x++ {
+				parser.packet.Body = append(parser.packet.Body, 0xff)
+			}
+		}
+
+		p, err := parser.Parse(b)
+		if i != len(goodMessage)-1 {
+			if p != nil || err != nil {
+				t.Errorf("Expected nil packet and nil error: %v %v", p, err)
+				t.FailNow()
+			}
+		} else {
+			if err == nil {
+				t.Errorf("Expected error on end of bytes")
+			}
+			if p != nil {
+				t.Errorf("Expected nil packet for end of bytes: %v", p)
+			}
+		}
+	}
+
 	// Test invalid internal state
 	parser.state += 20
 	if p, err := parser.Parse(PacketPreambleACK); p != nil || err == nil {
