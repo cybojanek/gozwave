@@ -1,4 +1,7 @@
-// Package controller reads and writes packets to a ZWave USB Serial Controller
+// Package controller reads and writes packets to a ZWave USB Serial Controller.
+// All methods are goroutine safe. The same controller instance can be opened
+// and closed multiple times. Closing the controller will invalidate all ongoing
+// requests and drop all buffered responses.
 package controller
 
 /*
@@ -23,6 +26,7 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 	"github.com/tarm/serial"
 	"log"
+	"sync"
 	"time"
 )
 
@@ -38,13 +42,17 @@ type controllerRequest struct {
 type Controller struct {
 	DevicePath string // Path USB serial device
 
-	serial           *serial.Port            // Serial port connection
-	responses        chan *packet.Packet     // Channel for packets read from serial
-	requests         chan *controllerRequest // Channel for outgoing requests
-	stopResponses    chan int                // Exit signal channel for doResponses
-	stopRequests     chan int                // Exit signal channel for doRequests
-	stoppedResponses chan int                // Exit confirmation channel for doResponses
-	stoppedRequests  chan int                // Exit confirmation channel for doRequests
+	mutex            sync.Mutex                                      // Controller mutex
+	callbackMutex    sync.Mutex                                      // Callback mutex
+	callbackChannels []map[*chan *packet.Packet]*chan *packet.Packet // Callback channels
+	callbackDefaults map[*chan *packet.Packet]*chan *packet.Packet   // Default callbacks
+	serial           *serial.Port                                    // Serial port connection
+	responses        chan *packet.Packet                             // Channel for packets read from serial
+	requests         chan *controllerRequest                         // Channel for outgoing requests
+	stopResponses    chan int                                        // Exit signal channel for doResponses
+	stopRequests     chan int                                        // Exit signal channel for doRequests
+	stoppedResponses chan int                                        // Exit confirmation channel for doResponses
+	stoppedRequests  chan int                                        // Exit confirmation channel for doRequests
 }
 
 // Maximum number of request send errors to retry
@@ -100,6 +108,29 @@ func (controller *Controller) readFully(b []byte) error {
 	return nil
 }
 
+// routeRespones routes a packet to a callback channel
+func (controller *Controller) routeReponse(packet *packet.Packet) {
+	controller.callbackMutex.Lock()
+	defer func() {
+		controller.callbackMutex.Unlock()
+	}()
+
+	// Get channels by message type
+	callbackChannels := controller.callbackChannels[packet.MessageType]
+
+	if len(callbackChannels) == 0 {
+		// If there is no message type channels then send out to default callbacks
+		callbackChannels = controller.callbackDefaults
+	}
+
+	for _, x := range callbackChannels {
+		// Call in goroutine to avoid deadlock in Controller
+		go func() {
+			*x <- packet.Copy()
+		}()
+	}
+}
+
 // Read from serial device and forward parsed packets to controller.responses
 func (controller *Controller) doResponses() {
 	// Parser and buffer
@@ -140,10 +171,6 @@ func (controller *Controller) doResponses() {
 			// Default for non-blocking continue
 		}
 	}
-}
-
-func (controller *Controller) routeReponse(packet *packet.Packet) {
-	// TODO: implement
 }
 
 // Process controller.requests and controller.responses
@@ -235,6 +262,18 @@ func (controller *Controller) doRequests() {
 					log.Printf("ERROR doRequests request timeout out after %v waiting for ACK",
 						requestACKTimeout)
 					attempt++
+
+				case <-controller.stopRequests:
+					log.Printf("INFO Dropping doRequests request due to close: %v",
+						request.Request)
+
+					request.Err = fmt.Errorf("Controller closed")
+					request.Chan <- 0
+
+					log.Printf("DEBUG doRequests EXIT")
+					controller.stoppedRequests <- 0
+
+					return
 				}
 			}
 
@@ -304,6 +343,18 @@ func (controller *Controller) doRequests() {
 					log.Printf("ERROR doRequests request response timeout out after %v waiting for SOF",
 						responseTimeout)
 					attempt++
+
+				case <-controller.stopRequests:
+					log.Printf("INFO Dropping doRequests request due to close: %v",
+						request.Request)
+
+					request.Err = fmt.Errorf("Controller closed")
+					request.Chan <- 0
+
+					log.Printf("DEBUG doRequests EXIT")
+					controller.stoppedRequests <- 0
+
+					return
 				}
 			}
 
@@ -317,6 +368,7 @@ func (controller *Controller) doRequests() {
 		case <-controller.stopRequests:
 			log.Printf("DEBUG doRequests EXIT")
 			controller.stoppedRequests <- 0
+			return
 		}
 	}
 }
@@ -324,10 +376,6 @@ func (controller *Controller) doRequests() {
 // BlockingRequest issues a request and awaits a response
 func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.Packet, error) {
 	log.Printf("DEBUG BlockingRequest(%v)", request)
-
-	if !controller.IsOpen() {
-		return nil, errors.New("Controller is not open")
-	}
 
 	if request.Preamble != packet.PacketPreambleSOF {
 		return nil, fmt.Errorf("Packet has non SOF Preamble: 0x%02x",
@@ -339,24 +387,111 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 			request.PacketType)
 	}
 
+	// Check before with lock to avoid deadlock on pre first open nil channel
+	if !controller.IsOpen() {
+		return nil, fmt.Errorf("Controller is not open")
+	}
+
 	// Send request
 	// NOTE: make chan 1 to not block controller routine
 	controllerRequest := controllerRequest{Request: request, Chan: make(chan int, 1)}
 	controller.requests <- &controllerRequest
+
+	controller.mutex.Lock()
+	if !controller.isOpen() {
+		// Error on all requests, ours might be there too
+		// NOTE: this will only loop indefinitely if there is an unending
+		//       stream of requests...
+		for {
+			finished := false
+
+			select {
+
+			case request := <-controller.requests:
+				log.Printf("INFO Dropping BlockingRequest request due to close: %v",
+					request)
+
+				request.Err = fmt.Errorf("Controller closed")
+				request.Chan <- 0
+
+			default:
+				finished = true
+			}
+
+			if finished {
+				break
+			}
+		}
+	}
+	controller.mutex.Unlock()
 
 	// Await reply
 	<-controllerRequest.Chan
 	return controllerRequest.Response, controllerRequest.Err
 }
 
+// AddCallbackChannel adds the channel to the callback list for the message type
+func (controller *Controller) AddCallbackChannel(messageType uint8, channel *chan *packet.Packet) {
+	controller.callbackMutex.Lock()
+	defer func() {
+		controller.callbackMutex.Unlock()
+	}()
+
+	controller.callbackChannels[messageType][channel] = channel
+}
+
+// RemoveCallbackChannel removes the channel from the callback list for the message type
+func (controller *Controller) RemoveCallbackChannel(messageType uint8, channel *chan *packet.Packet) {
+	controller.callbackMutex.Lock()
+	defer func() {
+		controller.callbackMutex.Unlock()
+	}()
+
+	delete(controller.callbackChannels[messageType], channel)
+}
+
+// AddDefaultCallbackChannel adds the channel to the default callback list
+func (controller *Controller) AddDefaultCallbackChannel(channel *chan *packet.Packet) {
+	controller.callbackMutex.Lock()
+	defer func() {
+		controller.callbackMutex.Unlock()
+	}()
+
+	controller.callbackDefaults[channel] = channel
+}
+
+// RemoveDefaultCallbackChannel removes the channel from the default callback list
+func (controller *Controller) RemoveDefaultCallbackChannel(channel *chan *packet.Packet) {
+	controller.callbackMutex.Lock()
+	defer func() {
+		controller.callbackMutex.Unlock()
+	}()
+
+	delete(controller.callbackDefaults, channel)
+}
+
 // IsOpen checks if Controller is open
 func (controller *Controller) IsOpen() bool {
+	controller.mutex.Lock()
+	defer func() {
+		controller.mutex.Unlock()
+	}()
+	return controller.serial != nil
+}
+
+// isOpen is an private function that does not acquire the controller mutex
+func (controller *Controller) isOpen() bool {
 	return controller.serial != nil
 }
 
 // Open controller
 func (controller *Controller) Open() error {
-	if controller.IsOpen() {
+	controller.mutex.Lock()
+	defer func() {
+		controller.mutex.Unlock()
+	}()
+
+	if controller.isOpen() {
 		return nil
 	}
 
@@ -372,12 +507,24 @@ func (controller *Controller) Open() error {
 
 	controller.serial.Flush()
 
-	controller.responses = make(chan *packet.Packet)
-	controller.requests = make(chan *controllerRequest)
-	controller.stopRequests = make(chan int)
-	controller.stoppedRequests = make(chan int)
-	controller.stopResponses = make(chan int)
-	controller.stoppedResponses = make(chan int)
+	// Create an array of callback channel maps for each possible message type
+	// We use a map for easy add/remove
+	if controller.callbackChannels == nil {
+		controller.callbackChannels = make([]map[*chan *packet.Packet]*chan *packet.Packet, 256)
+		for i := 0; i < 256; i++ {
+			controller.callbackChannels[i] = make(map[*chan *packet.Packet]*chan *packet.Packet)
+		}
+		controller.callbackDefaults = make(map[*chan *packet.Packet]*chan *packet.Packet)
+
+		controller.responses = make(chan *packet.Packet)
+		// 1 to avoid deadlock on closed submit
+		controller.requests = make(chan *controllerRequest, 1)
+		controller.stopRequests = make(chan int)
+		controller.stoppedRequests = make(chan int)
+		controller.stopResponses = make(chan int)
+		controller.stoppedResponses = make(chan int)
+	}
+
 	go controller.doRequests()
 	go controller.doResponses()
 
@@ -386,27 +533,53 @@ func (controller *Controller) Open() error {
 
 // Close controller
 func (controller *Controller) Close() error {
-	if !controller.IsOpen() {
-		return nil
-	}
+	controller.mutex.Lock()
+	defer func() {
+		controller.mutex.Unlock()
+	}()
 
-	// Handle double close with controller.serial.Close error
-	if controller.stopRequests != nil {
+	var err error
 
+	if controller.serial != nil {
+		// doRequests will always stop if triggered with stopRequqests
 		controller.stopRequests <- 0
 		<-controller.stoppedRequests
 
+		// doResponses might block on controller.responses, which we will purge
+		log.Printf("Sending controller.stopResponses!")
 		controller.stopResponses <- 0
+
+		// Purge all requests and responses
+		for {
+			finished := false
+
+			select {
+
+			case request := <-controller.requests:
+				log.Printf("INFO Dropping Close request: %v", request)
+
+				request.Err = fmt.Errorf("Controller closed")
+				request.Chan <- 0
+
+			case response := <-controller.responses:
+				log.Printf("INFO Dropping Close response: %v", response)
+
+			default:
+				finished = true
+			}
+
+			if finished {
+				break
+			}
+		}
+
 		<-controller.stoppedResponses
 
-		controller.stopRequests = nil
-	}
-
-	if err := controller.serial.Close(); err != nil {
-		return err
+		// Close after doReponses exits
+		err = controller.serial.Close()
 	}
 
 	controller.serial = nil
 
-	return nil
+	return err
 }

@@ -63,6 +63,19 @@ const (
 	packetParseStateChecksum
 )
 
+// Copy creates a deep copy of the packet
+func (packet *Packet) Copy() *Packet {
+	p := Packet{Preamble: packet.Preamble, Length: packet.Length,
+		PacketType: packet.PacketType, MessageType: packet.MessageType,
+		Body: make([]uint8, len(packet.Body)), Checksum: packet.Checksum}
+
+	for i, b := range packet.Body {
+		p.Body[i] = b
+	}
+
+	return &p
+}
+
 // Get String representation of a packet
 func (packet *Packet) String() string {
 	return fmt.Sprintf("%+v", *packet)

@@ -184,6 +184,19 @@ func TestPacket(t *testing.T) {
 				} else if !bytes.Equal(message, actualBytes) {
 					t.Errorf("Expected %v and got %v", message, actualBytes)
 				}
+
+				// Check copy
+				c := p.Copy()
+				if c == p {
+					t.Errorf("Expected packet copy to not match: %v %v", p, c)
+				}
+
+				// Check all other fields match
+				if c.Preamble != p.Preamble || c.Length != p.Length ||
+					c.PacketType != p.PacketType || c.MessageType != p.MessageType ||
+					c.Checksum != p.Checksum || !bytes.Equal(c.Body, p.Body) {
+					t.Errorf("Expected packets to match: %v %v", p, c)
+				}
 			}
 		}
 	}

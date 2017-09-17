@@ -42,6 +42,54 @@ func TestControllerOpenClose(t *testing.T) {
 			t.Errorf("Expected nil error: %v", err)
 		}
 	}()
+
+	if err := controller.Close(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+	}
+
+	if err := controller.Open(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+	}
+
+	if err := controller.Open(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+	}
+
+	if err := controller.Close(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+	}
+}
+
+func TestControllerClosedRequest(t *testing.T) {
+	controller := Controller{DevicePath: testDevicePath}
+
+	// Check request before open
+	requestPacket := message.SerialAPIGetInitDataRequest()
+	response, err := controller.BlockingRequest(requestPacket)
+	if err == nil {
+		t.Errorf("Expected non nil error: %v", err)
+	}
+	t.Logf("Reponse: %v", response)
+
+	if testing.Short() {
+		t.Skipf("Skipping controller test")
+	}
+
+	// Check request after close
+	if err := controller.Open(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+		t.FailNow()
+	}
+
+	if err := controller.Close(); err != nil {
+		t.Errorf("Expected nil error: %v", err)
+	}
+
+	response, err = controller.BlockingRequest(requestPacket)
+	if err == nil {
+		t.Errorf("Expected non nil error: %v", err)
+	}
+	t.Logf("Reponse: %v", response)
 }
 
 func TestController(t *testing.T) {
@@ -74,7 +122,7 @@ func TestController(t *testing.T) {
 	}
 }
 
-func TestControllerMessage(t *testing.T) {
+func TestControllerCallback(t *testing.T) {
 	controller := Controller{DevicePath: testDevicePath}
 
 	if testing.Short() {
@@ -92,13 +140,5 @@ func TestControllerMessage(t *testing.T) {
 		}
 	}()
 
-	if responsePacket, err := controller.BlockingRequest(
-		message.SerialAPIGetInitDataRequest()); err != nil {
-		t.Errorf("Expected nil error: %v", err)
-	} else if responseMessage, err := message.SerialAPIGetInitDataResponse(
-		responsePacket); err != nil {
-		t.Errorf("Expected nil error: %v", err)
-	} else {
-		t.Logf("Response message: %v", responseMessage)
-	}
+	// TODO: add more tests
 }
