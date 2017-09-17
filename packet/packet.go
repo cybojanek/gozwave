@@ -19,6 +19,7 @@ limitations under the License.
 
 import (
 	"fmt"
+	"strings"
 )
 
 // Packet preamble
@@ -41,7 +42,7 @@ type Packet struct {
 	Length      uint8
 	PacketType  uint8
 	MessageType uint8
-	Body        []uint8 // Maximum length is 252 bytes
+	Body        []uint8
 	Checksum    uint8
 }
 
@@ -78,7 +79,15 @@ func (packet *Packet) Copy() *Packet {
 
 // Get String representation of a packet
 func (packet *Packet) String() string {
-	return fmt.Sprintf("%+v", *packet)
+	stringBytes := make([]string, len(packet.Body))
+	for i, x := range packet.Body {
+		stringBytes[i] = fmt.Sprintf("0x%02x", x)
+	}
+
+	return fmt.Sprintf("{Preamble: 0x%02x Length: 0x%02x PacketType: 0x%02x "+
+		"MessageType: 0x%02x Body: %s Checksum: 0x%02x",
+		packet.Preamble, packet.Length, packet.PacketType, packet.MessageType,
+		strings.Join(stringBytes, " "), packet.Checksum)
 }
 
 // Bytes runs Update() and returns the binary serialization of the packet.

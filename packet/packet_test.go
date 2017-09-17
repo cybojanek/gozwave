@@ -141,6 +141,8 @@ func TestPacket(t *testing.T) {
 				// Test to string
 				if v := fmt.Sprintf("%s", p); len(v) == 0 {
 					t.Errorf("Expected non zero object string")
+				} else {
+					t.Log(v)
 				}
 
 				expectedPacket := packets[iter]
