@@ -38,3 +38,11 @@ const (
 	GenericTypeSensorAlarm              = 0xA1
 	GenericTypeNonInteroperable         = 0xFF
 )
+
+// Command Class
+const (
+	CommandClassNoOperation          uint8 = 0x01
+	CommandClassManufacturerSpecific       = 0x72
+	CommandClassWakeup                     = 0x84
+	CommandClassMark                       = 0xef
+)

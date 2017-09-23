@@ -250,7 +250,8 @@ func ZWSendDataResponse(p *packet.Packet) (*ZWSendData, error) {
 		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
 	}
 
-	message := ZWSendData{CallbackID: p.Body[0], Status: p.Body[1]}
+	message := ZWSendData{CallbackID: p.Body[0], Status: p.Body[1],
+		TransmitTime: binary.BigEndian.Uint16(p.Body[2:4])}
 
 	return &message, nil
 }

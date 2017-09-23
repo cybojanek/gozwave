@@ -155,8 +155,9 @@ type ZWRequestNodeInfo struct {
 
 // ZWSendData information
 type ZWSendData struct {
-	CallbackID uint8
-	Status     uint8
+	CallbackID   uint8
+	Status       uint8
+	TransmitTime uint16
 }
 
 // IsValidNodeID checks if the nodeID is in the valid range of nodes
