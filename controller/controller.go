@@ -96,9 +96,7 @@ func (controller *Controller) writeFully(b []byte) error {
 // routeRespones routes a packet to a callback channel
 func (controller *Controller) routeReponse(packet *packet.Packet) {
 	controller.mutex.Lock()
-	defer func() {
-		controller.mutex.Unlock()
-	}()
+	defer controller.mutex.Unlock()
 
 	// NOTE: extract to local variable to not refernce controller in goroutine
 	channel := controller.callbackChannel
@@ -260,10 +258,20 @@ func (controller *Controller) doRequests() {
 			requestBytes = append(requestBytes, '\n')
 
 			// Send out request
+
+			resend := true
 			gotACK := false
 			for attempt := 0; attempt < maxRequestRetryCount && !gotACK; {
+
 				// Write Packet
-				controller.writeFully(requestBytes)
+				if resend {
+					if err := controller.writeFully(requestBytes); err != nil {
+						request.Err = fmt.Errorf("Failed to write bytes to serial device %v", err)
+						request.Chan <- 0
+						break
+					}
+					resend = false
+				}
 
 				select {
 
@@ -297,6 +305,7 @@ func (controller *Controller) doRequests() {
 						// an error. If we have lots of nodes, this could be
 						// frequent, so don't count this as an error
 						log.Printf("ERROR doRequests request got unexpected CAN")
+						resend = true
 
 					case packet.PacketPreambleACK:
 						// Got what we were expecting
@@ -307,8 +316,10 @@ func (controller *Controller) doRequests() {
 						// is bad...
 						log.Printf("ERROR doRequests request got unexpected NAK")
 						attempt++
+						resend = true
 
 					default:
+						// Parser should never let this happen
 						log.Printf("ERROR doRequests request got unknown Preamble: 0x%02x",
 							response.Preamble)
 						attempt++
@@ -318,6 +329,7 @@ func (controller *Controller) doRequests() {
 					log.Printf("ERROR doRequests request timeout out after %v waiting for ACK",
 						requestACKTimeout)
 					attempt++
+					resend = true
 
 				case <-controller.stopRequests:
 					request.Err = fmt.Errorf("Controller closed")
@@ -367,55 +379,7 @@ func (controller *Controller) doRequests() {
 								"ACK writeFully error: %v", err)
 						}
 
-						if request.Request.MessageType == response.MessageType {
-							if response.MessageType == message.MessageTypeZWSendData {
-								if responseCount == 0 {
-									// This is the first ZWSendData response
-									if len(response.Body) != 1 {
-										log.Printf("ERROR doRequests request response "+
-											"ZWSendData reply too long: %d", len(response.Body))
-										// Try to route it anyways
-										controller.routeReponse(response)
-										attempt++
-										continue
-									} else if response.Body[0] != 1 {
-										log.Printf("ERROR doRequests request response "+
-											"ZWSendData reply not 1: 0x%02x", response.Body[0])
-										attempt++
-										continue
-									} else {
-										// This is just the 1 byte response confirming
-										// our request. We need to wait for one more
-										// response with the final data
-										attempt = 0
-										responseCount = 1
-										goto wait_for_response
-									}
-								} else {
-									// Check for matching callback id
-									if len(response.Body) != 4 {
-										log.Printf("ERROR doRequests request response "+
-											"ZWSendData reply not == 4: 0x%02x", len(response.Body))
-										attempt++
-										continue
-									} else if actualCallbackID := response.Body[0]; actualCallbackID != callbackID {
-										// FIXME: better checking
-										log.Printf("ERROR doRequests request response "+
-											"ZWSendData reply callback mismatch 0x%02x != 0x%02x",
-											actualCallbackID, callbackID)
-										attempt++
-										controller.routeReponse(response)
-										continue
-									} else {
-										// It matches! Nothing to do, fall through
-									}
-								}
-							}
-
-							request.Response = response
-							gotResponse = true
-							request.Chan <- 0
-						} else {
+						if request.Request.MessageType != response.MessageType {
 							if controller.DebugLogging {
 								log.Printf("DEBUG doRequests request response "+
 									"expected MessageType: 0x%02x got 0x%02x, "+
@@ -425,7 +389,57 @@ func (controller *Controller) doRequests() {
 							}
 							attempt++
 							controller.routeReponse(response)
+							continue
 						}
+
+						if response.MessageType == message.MessageTypeZWSendData {
+							if responseCount == 0 {
+								// This is the first ZWSendData response
+								if len(response.Body) != 1 {
+									log.Printf("ERROR doRequests request response "+
+										"ZWSendData reply too long: %d", len(response.Body))
+									// Try to route it anyways
+									controller.routeReponse(response)
+									attempt++
+									continue
+								} else if response.Body[0] != 1 {
+									log.Printf("ERROR doRequests request response "+
+										"ZWSendData reply not TransmitCompleteOK (0x00): 0x%02x",
+										response.Body[0])
+									attempt++
+									continue
+								} else {
+									// This is just the 1 byte response confirming
+									// our request. We need to wait for one more
+									// response with the final data
+									attempt = 0
+									responseCount = 1
+									goto wait_for_response
+								}
+							} else {
+								// Check for matching callback id
+								if len(response.Body) != 4 {
+									log.Printf("ERROR doRequests request response "+
+										"ZWSendData reply not == 4: 0x%02x", len(response.Body))
+									attempt++
+									continue
+								} else if actualCallbackID := response.Body[0]; actualCallbackID != callbackID {
+									// FIXME: better checking
+									log.Printf("ERROR doRequests request response "+
+										"ZWSendData reply callback mismatch 0x%02x != 0x%02x",
+										actualCallbackID, callbackID)
+									attempt++
+									controller.routeReponse(response)
+									continue
+								} else {
+									// It matches! Nothing to do, fall through
+								}
+							}
+						}
+
+						request.Response = response
+						gotResponse = true
+						request.Chan <- 0
 
 					case packet.PacketPreambleCAN:
 						// FIXME: how to handle this
@@ -524,9 +538,7 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 // SetCallbackChannel set the channel to the callback list, can be null
 func (controller *Controller) SetCallbackChannel(channel *chan *packet.Packet) {
 	controller.mutex.Lock()
-	defer func() {
-		controller.mutex.Unlock()
-	}()
+	defer controller.mutex.Unlock()
 
 	controller.callbackChannel = channel
 }
@@ -539,9 +551,7 @@ func (controller *Controller) isOpen() bool {
 // Open controller
 func (controller *Controller) Open() error {
 	controller.mutex.Lock()
-	defer func() {
-		controller.mutex.Unlock()
-	}()
+	defer controller.mutex.Unlock()
 
 	if controller.isOpen() {
 		return nil
@@ -569,6 +579,7 @@ func (controller *Controller) Open() error {
 	}
 
 	// On startup choose a random starting callbackID
+	rand.Seed(time.Now().Unix())
 	controller.lastCallbackID = uint8(rand.Int31n(callbackIDMax-callbackIDMin+1) + callbackIDMin)
 
 	go controller.doRequests()
@@ -580,9 +591,7 @@ func (controller *Controller) Open() error {
 // Close controller
 func (controller *Controller) Close() error {
 	controller.mutex.Lock()
-	defer func() {
-		controller.mutex.Unlock()
-	}()
+	defer controller.mutex.Unlock()
 
 	if !controller.isOpen() {
 		return nil
