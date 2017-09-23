@@ -85,7 +85,7 @@ func (packet *Packet) String() string {
 	}
 
 	return fmt.Sprintf("{Preamble: 0x%02x Length: 0x%02x PacketType: 0x%02x "+
-		"MessageType: 0x%02x Body: %s Checksum: 0x%02x",
+		"MessageType: 0x%02x Body: %s Checksum: 0x%02x}",
 		packet.Preamble, packet.Length, packet.PacketType, packet.MessageType,
 		strings.Join(stringBytes, " "), packet.Checksum)
 }

@@ -1,7 +1,7 @@
 // Package controller reads and writes packets to a ZWave USB Serial Controller.
-// All methods are goroutine safe. The same controller instance can be opened
-// and closed multiple times. Closing the controller will invalidate all ongoing
-// requests and drop all buffered responses.
+// All public methods are goroutine safe. The same controller instance can be
+// opened and closed multiple times. Closing the controller will invalidate all
+// ongoing requests and drop all buffered responses.
 package controller
 
 /*
@@ -23,9 +23,11 @@ limitations under the License.
 import (
 	"errors"
 	"fmt"
+	"github.com/cybojanek/gozwave/message"
 	"github.com/cybojanek/gozwave/packet"
 	"github.com/tarm/serial"
 	"log"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -43,18 +45,21 @@ type Controller struct {
 	DevicePath   string // Path USB serial device
 	DebugLogging bool   // Toggle DEBUG logging
 
-	mutex            sync.Mutex                                      // Controller mutex
-	callbackMutex    sync.Mutex                                      // Callback mutex
-	callbackChannels []map[*chan *packet.Packet]*chan *packet.Packet // Callback channels
-	callbackDefaults map[*chan *packet.Packet]*chan *packet.Packet   // Default callbacks
-	serial           *serial.Port                                    // Serial port connection
-	responses        chan *packet.Packet                             // Channel for packets read from serial
-	requests         chan *controllerRequest                         // Channel for outgoing requests
-	stopResponses    chan int                                        // Exit signal channel for doResponses
-	stopRequests     chan int                                        // Exit signal channel for doRequests
-	stoppedResponses chan int                                        // Exit confirmation channel for doResponses
-	stoppedRequests  chan int                                        // Exit confirmation channel for doRequests
+	lastCallbackID   uint8                   // Next ZWSendData callback id
+	mutex            sync.Mutex              // Controller mutex
+	callbackChannel  *chan *packet.Packet    // Callback channel
+	serial           *serial.Port            // Serial port connection
+	responses        chan *packet.Packet     // Channel for packets read from serial
+	requests         chan *controllerRequest // Channel for outgoing requests
+	stopResponses    chan int                // Exit signal channel for doResponses
+	stopRequests     chan int                // Exit signal channel for doRequests
+	stoppedResponses chan int                // Exit confirmation channel for doResponses
+	stoppedRequests  chan int                // Exit confirmation channel for doRequests
 }
+
+// TODO: check constraints on this
+const callbackIDMin = 0x0a + 1
+const callbackIDMax = 0x7f
 
 // Maximum number of request send errors to retry
 const maxRequestRetryCount = 5
@@ -72,13 +77,10 @@ const responseTimeout = (10 * time.Second)
 const serialPortReadTimeout = (1 * time.Second)
 
 var ackBytes = []uint8{packet.PacketPreambleACK, '\n'}
+var nakBytes = []uint8{packet.PacketPreambleNAK, '\n'}
 
 // Write all bytes to the serial device
 func (controller *Controller) writeFully(b []byte) error {
-	if controller.DebugLogging {
-		log.Printf("DEBUG writeFully(%v)", b)
-	}
-
 	written := 0
 	for written < len(b) {
 		n, err := controller.serial.Write(b[written:])
@@ -88,54 +90,22 @@ func (controller *Controller) writeFully(b []byte) error {
 		}
 		written += n
 	}
-
-	if controller.DebugLogging {
-		log.Printf("DEBUG writeFully EXIT")
-	}
-	return nil
-}
-
-// Read from serial device until array is full
-func (controller *Controller) readFully(b []byte) error {
-	if controller.DebugLogging {
-		log.Printf("DEBUG readFully(%d)", len(b))
-	}
-
-	read := 0
-	for read < len(b) {
-		n, err := controller.serial.Read(b[read:])
-		if err != nil {
-			log.Printf("ERROR readFully error: %v", err)
-			return err
-		}
-		read += n
-	}
-
-	if controller.DebugLogging {
-		log.Printf("DEBUG readFully EXIT: %v", b)
-	}
 	return nil
 }
 
 // routeRespones routes a packet to a callback channel
 func (controller *Controller) routeReponse(packet *packet.Packet) {
-	controller.callbackMutex.Lock()
+	controller.mutex.Lock()
 	defer func() {
-		controller.callbackMutex.Unlock()
+		controller.mutex.Unlock()
 	}()
 
-	// Get channels by message type
-	callbackChannels := controller.callbackChannels[packet.MessageType]
-
-	if len(callbackChannels) == 0 {
-		// If there is no message type channels then send out to default callbacks
-		callbackChannels = controller.callbackDefaults
-	}
-
-	for _, x := range callbackChannels {
+	// NOTE: extract to local variable to not refernce controller in goroutine
+	channel := controller.callbackChannel
+	if channel != nil {
 		// Call in goroutine to avoid deadlock in Controller
 		go func() {
-			*x <- packet.Copy()
+			*channel <- packet.Copy()
 		}()
 	}
 }
@@ -160,6 +130,10 @@ func (controller *Controller) doResponses() {
 				if p, err := parser.Parse(b); err != nil {
 					// Log error
 					log.Printf("ERROR failed parsing response: %v", err)
+					// Reply with NAK, however its not safe to do that from
+					// here, so send a nil packet to controller.responses
+					// FIXME: implement a better signaling method
+					controller.responses <- nil
 				} else if p != nil {
 					// Forward parsed packet
 					controller.responses <- p
@@ -167,16 +141,11 @@ func (controller *Controller) doResponses() {
 			}
 		} else if n < 0 {
 			log.Printf("ERROR doResponses bad n value: %d", n)
-		} else {
-			if controller.DebugLogging {
-				log.Printf("DEBUG doResponses waiting...")
-			}
 		}
 
 		select {
 		case <-controller.stopResponses:
 			// Received exit signal
-			log.Printf("INFO doResponses EXIT")
 			controller.stoppedResponses <- 0
 			return
 
@@ -186,36 +155,57 @@ func (controller *Controller) doResponses() {
 	}
 }
 
+func (controller *Controller) getCallbackID() uint8 {
+	if controller.lastCallbackID >= callbackIDMax {
+		controller.lastCallbackID = callbackIDMin
+	}
+
+	ret := controller.lastCallbackID
+	controller.lastCallbackID++
+	return ret
+}
+
 // Process controller.requests and controller.responses
 func (controller *Controller) doRequests() {
+	// Start with NAK bytes to reset stream
+	if err := controller.writeFully(nakBytes); err != nil {
+		log.Printf("ERROR doRequests initial NAK error: %v", err)
+	}
+
 	for {
 		select {
 
 		case response := <-controller.responses:
 			// Handle packets not generated by requests, i.e. status reports
-			// from switches after they are toggled on or off
+			// from switches after they are toggled on or off, or by out of
+			// sync or timed out requests
 			if controller.DebugLogging {
 				log.Printf("DEBUG doRequests response Packet: %v", response)
 			}
-			if response == nil {
-				log.Printf("ERROR doRequests response got nil Packet")
-			} else {
-				switch response.Preamble {
-				case packet.PacketPreambleSOF:
-					// Immediately ACK back to SOF messages
-					if err := controller.writeFully(ackBytes); err != nil {
-						log.Printf("ERROR doRequests response ACK writeFully error: %v",
-							err)
-					}
-					controller.routeReponse(response)
 
-				case packet.PacketPreambleACK, packet.PacketPreambleCAN, packet.PacketPreambleNAK:
-					log.Printf("ERROR doRequests response got unexpected Preamble: 0x%02x",
-						response.Preamble)
-				default:
-					log.Printf("ERROR doRequests response got unknown Preamble: 0x%02x",
-						response.Preamble)
+			if response == nil {
+				// Send a NAK
+				if err := controller.writeFully(nakBytes); err != nil {
+					log.Printf("ERROR doRequests response NAK writeFully error: %v", err)
 				}
+				continue
+			}
+
+			switch response.Preamble {
+			case packet.PacketPreambleSOF:
+				// Immediately ACK back to SOF messages
+				if err := controller.writeFully(ackBytes); err != nil {
+					log.Printf("ERROR doRequests response ACK writeFully error: %v", err)
+				}
+				controller.routeReponse(response)
+
+			case packet.PacketPreambleACK, packet.PacketPreambleCAN, packet.PacketPreambleNAK:
+				log.Printf("DEBUG doRequests response got ACK, CAN, or NAK: 0x%02x",
+					response.Preamble)
+
+			default:
+				log.Printf("ERROR doRequests response got unknown Preamble: 0x%02x",
+					response.Preamble)
 			}
 
 		case request := <-controller.requests:
@@ -224,13 +214,49 @@ func (controller *Controller) doRequests() {
 				log.Printf("DEBUG doRequests request Packet: %v", request.Request)
 			}
 
+			// For ZWSendData, we need to inspect and potentially inject a
+			// random callback id. This is ugly, since we're mixing protocol
+			// layers, but at least we can transparently handle this.
+			var callbackID uint8
+			if request.Request.MessageType == message.MessageTypeZWSendData {
+				callbackID = controller.getCallbackID()
+
+				body := request.Request.Body
+				// Body: | NODE_ID | LENGTH_OF_PAYLOAD + 1 | COMMAND_CLASS |
+				//       | PAYLOAD | TRANSMIT_OPTIONS | CALLBACK_ID |
+				if len(body) < 4 {
+					request.Err = fmt.Errorf("ZWSendData request is too small")
+					request.Chan <- 0
+					break
+				}
+				payloadLength := body[1]
+				if int(payloadLength)+4 == len(body) {
+					// Callback id is last byte - error, not allowed
+					request.Err = fmt.Errorf("Specifying a custom ZWSendData " +
+						"CallbackID is not allowed")
+					request.Chan <- 0
+					break
+				} else if int(payloadLength)+3 == len(body) {
+					// No callback id
+					request.Request.Body = append(request.Request.Body, callbackID)
+				} else {
+					request.Err = fmt.Errorf("ZWSendData request has unexpected length")
+					request.Chan <- 0
+					break
+				}
+
+				if controller.DebugLogging {
+					log.Printf("DEBUG doRequests request modified Packet: %v", request.Request)
+				}
+			}
+
 			requestBytes, reqErr := request.Request.Bytes()
 			if reqErr != nil {
-				log.Printf("ERROR doRequests request Bytes() error: %v", reqErr)
 				request.Err = fmt.Errorf("Failed to Bytes() packet: %v", reqErr)
 				request.Chan <- 0
 				break
 			}
+			// Serial port requires packets to be newline terminated
 			requestBytes = append(requestBytes, '\n')
 
 			// Send out request
@@ -242,13 +268,26 @@ func (controller *Controller) doRequests() {
 				select {
 
 				case response := <-controller.responses:
+					if controller.DebugLogging {
+						log.Printf("DEBUG doRequests request response A: %v", response)
+					}
+
+					if response == nil {
+						// Send a NAK
+						log.Printf("ERROR doRequests request unexpected NAK request")
+						if err := controller.writeFully(nakBytes); err != nil {
+							log.Printf("ERROR doRequests request NAK writeFully error: %v", err)
+						}
+						attempt++
+						continue
+					}
+
 					switch response.Preamble {
 					case packet.PacketPreambleSOF:
 						// Recieved a packet not generatd by this request
 						// Immediately ACK back to SOF messages
 						if err := controller.writeFully(ackBytes); err != nil {
-							log.Printf("ERROR doRequests request ACK writeFully error: %v",
-								err)
+							log.Printf("ERROR doRequests request ACK writeFully error: %v", err)
 						}
 						// Try to route it anyway...
 						controller.routeReponse(response)
@@ -261,13 +300,11 @@ func (controller *Controller) doRequests() {
 
 					case packet.PacketPreambleACK:
 						// Got what we were expecting
-						if controller.DebugLogging {
-							log.Printf("DEBUG doRequests request got expected ACK")
-						}
 						gotACK = true
 
 					case packet.PacketPreambleNAK:
-						// FIXME: what does this mean?
+						// Error in packet transmission, or our packet encoding
+						// is bad...
 						log.Printf("ERROR doRequests request got unexpected NAK")
 						attempt++
 
@@ -283,28 +320,22 @@ func (controller *Controller) doRequests() {
 					attempt++
 
 				case <-controller.stopRequests:
-					log.Printf("INFO Dropping doRequests request due to close: %v",
-						request.Request)
-
 					request.Err = fmt.Errorf("Controller closed")
 					request.Chan <- 0
-
-					log.Printf("INFO doRequests EXIT")
 					controller.stoppedRequests <- 0
-
 					return
 				}
 			}
 
 			// Check if we got an ACK
 			if !gotACK {
-				log.Printf("ERROR doRequests request failed after %d attempts",
-					maxRequestRetryCount)
 				request.Err = errors.New("Failed to send request")
 				request.Chan <- 0
 				break
 			}
 
+			responseCount := 0
+		wait_for_response:
 			// Await response
 			gotResponse := false
 			for attempt := 0; attempt < maxResponseRetryCount && !gotResponse; {
@@ -312,6 +343,21 @@ func (controller *Controller) doRequests() {
 				select {
 
 				case response := <-controller.responses:
+
+					if controller.DebugLogging {
+						log.Printf("DEBUG doRequests request response B: %v", response)
+					}
+
+					if response == nil {
+						// Send a NAK
+						if err := controller.writeFully(nakBytes); err != nil {
+							log.Printf("ERROR doRequests request response "+
+								"NAK writeFully error: %v", err)
+						}
+						attempt++
+						continue
+					}
+
 					switch response.Preamble {
 					case packet.PacketPreambleSOF:
 						// Recieved our response!
@@ -322,19 +368,61 @@ func (controller *Controller) doRequests() {
 						}
 
 						if request.Request.MessageType == response.MessageType {
-							// TODO: is this always true?
-							if controller.DebugLogging {
-								log.Printf("DEBUG doRequests request reponse %v", response)
+							if response.MessageType == message.MessageTypeZWSendData {
+								if responseCount == 0 {
+									// This is the first ZWSendData response
+									if len(response.Body) != 1 {
+										log.Printf("ERROR doRequests request response "+
+											"ZWSendData reply too long: %d", len(response.Body))
+										// Try to route it anyways
+										controller.routeReponse(response)
+										attempt++
+										continue
+									} else if response.Body[0] != 1 {
+										log.Printf("ERROR doRequests request response "+
+											"ZWSendData reply not 1: 0x%02x", response.Body[0])
+										attempt++
+										continue
+									} else {
+										// This is just the 1 byte response confirming
+										// our request. We need to wait for one more
+										// response with the final data
+										attempt = 0
+										responseCount = 1
+										goto wait_for_response
+									}
+								} else {
+									// Check for matching callback id
+									if len(response.Body) != 4 {
+										log.Printf("ERROR doRequests request response "+
+											"ZWSendData reply not == 4: 0x%02x", len(response.Body))
+										attempt++
+										continue
+									} else if actualCallbackID := response.Body[0]; actualCallbackID != callbackID {
+										// FIXME: better checking
+										log.Printf("ERROR doRequests request response "+
+											"ZWSendData reply callback mismatch 0x%02x != 0x%02x",
+											actualCallbackID, callbackID)
+										attempt++
+										controller.routeReponse(response)
+										continue
+									} else {
+										// It matches! Nothing to do, fall through
+									}
+								}
 							}
+
 							request.Response = response
 							gotResponse = true
 							request.Chan <- 0
 						} else {
-							log.Printf("ERROR doRequests request response "+
-								"expected MessageType: 0x%02x got 0x%02x, "+
-								"will try to route Response: %v",
-								request.Request.MessageType,
-								response.MessageType, response)
+							if controller.DebugLogging {
+								log.Printf("DEBUG doRequests request response "+
+									"expected MessageType: 0x%02x got 0x%02x, "+
+									"will try to route Response: %v",
+									request.Request.MessageType,
+									response.MessageType, response)
+							}
 							attempt++
 							controller.routeReponse(response)
 						}
@@ -346,9 +434,7 @@ func (controller *Controller) doRequests() {
 
 					case packet.PacketPreambleACK:
 						// FIXME: how to handle this
-						if controller.DebugLogging {
-							log.Printf("DEBUG doRequests request response got unexpected ACK")
-						}
+						log.Printf("ERROR doRequests request response got unexpected ACK")
 						attempt++
 
 					case packet.PacketPreambleNAK:
@@ -363,33 +449,22 @@ func (controller *Controller) doRequests() {
 					}
 
 				case <-time.After(responseTimeout):
-					log.Printf("ERROR doRequests request response timeout out after %v waiting for SOF",
-						responseTimeout)
 					attempt++
 
 				case <-controller.stopRequests:
-					log.Printf("INFO Dropping doRequests request due to close: %v",
-						request.Request)
-
 					request.Err = fmt.Errorf("Controller closed")
 					request.Chan <- 0
-
-					log.Printf("INFO doRequests EXIT")
 					controller.stoppedRequests <- 0
-
 					return
 				}
 			}
 
 			if !gotResponse {
-				log.Printf("ERROR doRequests request response failed after %d attempts",
-					maxResponseRetryCount)
 				request.Err = errors.New("Failed to get request response")
 				request.Chan <- 0
 			}
 
 		case <-controller.stopRequests:
-			log.Printf("INFO doRequests EXIT")
 			controller.stoppedRequests <- 0
 			return
 		}
@@ -398,10 +473,6 @@ func (controller *Controller) doRequests() {
 
 // BlockingRequest issues a request and awaits a response
 func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.Packet, error) {
-	if controller.DebugLogging {
-		log.Printf("DEBUG BlockingRequest(%v)", request)
-	}
-
 	if request.Preamble != packet.PacketPreambleSOF {
 		return nil, fmt.Errorf("Packet has non SOF Preamble: 0x%02x",
 			request.Preamble)
@@ -413,9 +484,12 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	}
 
 	// Check before with lock to avoid deadlock on pre first open nil channel
-	if !controller.IsOpen() {
+	controller.mutex.Lock()
+	if !controller.isOpen() {
+		controller.mutex.Unlock()
 		return nil, fmt.Errorf("Controller is not open")
 	}
+	controller.mutex.Unlock()
 
 	// Send request
 	// NOTE: make chan 1 to not block controller routine
@@ -426,25 +500,17 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	if !controller.isOpen() {
 		// Error on all requests, ours might be there too
 		// NOTE: this will only loop indefinitely if there is an unending
-		//       stream of requests...
+		//       stream of new requests...
+	loop:
 		for {
-			finished := false
-
 			select {
 
 			case request := <-controller.requests:
-				log.Printf("INFO Dropping BlockingRequest request due to close: %v",
-					request)
-
 				request.Err = fmt.Errorf("Controller closed")
 				request.Chan <- 0
 
 			default:
-				finished = true
-			}
-
-			if finished {
-				break
+				break loop
 			}
 		}
 	}
@@ -455,53 +521,14 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	return controllerRequest.Response, controllerRequest.Err
 }
 
-// AddCallbackChannel adds the channel to the callback list for the message type
-func (controller *Controller) AddCallbackChannel(messageType uint8, channel *chan *packet.Packet) {
-	controller.callbackMutex.Lock()
-	defer func() {
-		controller.callbackMutex.Unlock()
-	}()
-
-	controller.callbackChannels[messageType][channel] = channel
-}
-
-// RemoveCallbackChannel removes the channel from the callback list for the message type
-func (controller *Controller) RemoveCallbackChannel(messageType uint8, channel *chan *packet.Packet) {
-	controller.callbackMutex.Lock()
-	defer func() {
-		controller.callbackMutex.Unlock()
-	}()
-
-	delete(controller.callbackChannels[messageType], channel)
-}
-
-// AddDefaultCallbackChannel adds the channel to the default callback list
-func (controller *Controller) AddDefaultCallbackChannel(channel *chan *packet.Packet) {
-	controller.callbackMutex.Lock()
-	defer func() {
-		controller.callbackMutex.Unlock()
-	}()
-
-	controller.callbackDefaults[channel] = channel
-}
-
-// RemoveDefaultCallbackChannel removes the channel from the default callback list
-func (controller *Controller) RemoveDefaultCallbackChannel(channel *chan *packet.Packet) {
-	controller.callbackMutex.Lock()
-	defer func() {
-		controller.callbackMutex.Unlock()
-	}()
-
-	delete(controller.callbackDefaults, channel)
-}
-
-// IsOpen checks if Controller is open
-func (controller *Controller) IsOpen() bool {
+// SetCallbackChannel set the channel to the callback list, can be null
+func (controller *Controller) SetCallbackChannel(channel *chan *packet.Packet) {
 	controller.mutex.Lock()
 	defer func() {
 		controller.mutex.Unlock()
 	}()
-	return controller.serial != nil
+
+	controller.callbackChannel = channel
 }
 
 // isOpen is an private function that does not acquire the controller mutex
@@ -520,7 +547,6 @@ func (controller *Controller) Open() error {
 		return nil
 	}
 
-	// rtscts True, dsrdtr True
 	c := &serial.Config{Name: controller.DevicePath, Baud: 115200,
 		ReadTimeout: serialPortReadTimeout}
 
@@ -532,15 +558,7 @@ func (controller *Controller) Open() error {
 
 	controller.serial.Flush()
 
-	// Create an array of callback channel maps for each possible message type
-	// We use a map for easy add/remove
-	if controller.callbackChannels == nil {
-		controller.callbackChannels = make([]map[*chan *packet.Packet]*chan *packet.Packet, 256)
-		for i := 0; i < 256; i++ {
-			controller.callbackChannels[i] = make(map[*chan *packet.Packet]*chan *packet.Packet)
-		}
-		controller.callbackDefaults = make(map[*chan *packet.Packet]*chan *packet.Packet)
-
+	if controller.responses == nil {
 		controller.responses = make(chan *packet.Packet)
 		// 1 to avoid deadlock on closed submit
 		controller.requests = make(chan *controllerRequest, 1)
@@ -549,6 +567,9 @@ func (controller *Controller) Open() error {
 		controller.stopResponses = make(chan int)
 		controller.stoppedResponses = make(chan int)
 	}
+
+	// On startup choose a random starting callbackID
+	controller.lastCallbackID = uint8(rand.Int31n(callbackIDMax-callbackIDMin+1) + callbackIDMin)
 
 	go controller.doRequests()
 	go controller.doResponses()
@@ -563,45 +584,40 @@ func (controller *Controller) Close() error {
 		controller.mutex.Unlock()
 	}()
 
-	var err error
-
-	if controller.serial != nil {
-		// doRequests will always stop if triggered with stopRequqests
-		controller.stopRequests <- 0
-		<-controller.stoppedRequests
-
-		// doResponses might block on controller.responses, which we will purge
-		controller.stopResponses <- 0
-
-		// Purge all requests and responses
-		for {
-			finished := false
-
-			select {
-
-			case request := <-controller.requests:
-				log.Printf("INFO Dropping Close request: %v", request)
-
-				request.Err = fmt.Errorf("Controller closed")
-				request.Chan <- 0
-
-			case response := <-controller.responses:
-				log.Printf("INFO Dropping Close response: %v", response)
-
-			default:
-				finished = true
-			}
-
-			if finished {
-				break
-			}
-		}
-
-		<-controller.stoppedResponses
-
-		// Close after doReponses exits
-		err = controller.serial.Close()
+	if !controller.isOpen() {
+		return nil
 	}
+
+	// doRequests will always stop if triggered with stopRequqests
+	controller.stopRequests <- 0
+	<-controller.stoppedRequests
+
+	// doResponses might block on sending to controller.responses, so don't
+	// check for stoppedResponses until after purging all channels
+	controller.stopResponses <- 0
+
+	// Purge all requests and responses
+loop:
+	for {
+		select {
+
+		case request := <-controller.requests:
+			request.Err = fmt.Errorf("Controller closed")
+			request.Chan <- 0
+
+		case <-controller.responses:
+			// Pass and drop
+
+		default:
+			break loop
+		}
+	}
+
+	// Now safe to expect response
+	<-controller.stoppedResponses
+
+	// Close after doReponses exits
+	err := controller.serial.Close()
 
 	controller.serial = nil
 
