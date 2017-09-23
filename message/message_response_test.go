@@ -159,8 +159,12 @@ func TestSerialAPIGetCapabilitiesResponse(t *testing.T) {
 		t.FailNow()
 	}
 
-	if message.Version != 0x2010 {
-		t.Errorf("Expected Version: 0x%04x got: 0x%04x", 0x2010, message.Version)
+	if message.Application.Version != 0x10 {
+		t.Errorf("Expected Version: 0x%02x got: 0x%02x", 0x10, message.Application.Version)
+	}
+
+	if message.Application.Revision != 0x20 {
+		t.Errorf("Expected Revision: 0x%02x got: 0x%02x", 0x20, message.Application.Revision)
 	}
 
 	if message.Manufacturer != 0x3586 {

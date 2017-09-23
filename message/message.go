@@ -17,25 +17,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import (
-	"fmt"
-)
-
-// Basic Command
-const (
-	BasicCommandSet    uint8 = 0x01
-	BasicCommandGet          = 0x02
-	BasicCommandReport       = 0x03
-)
-
-// Command Class
-const (
-	CommandClassBasic                 uint8 = 0x20
-	ComamndClassControllerReplication       = 0x21
-	CommandClassApplicationStatus           = 0x22
-	CommandClassHail                        = 0x23
-)
-
 // Message Type
 const (
 	MessageTypeNone                        uint8 = 0x00
@@ -44,8 +25,11 @@ const (
 	MessageTypeZWGetControllerCapabilities       = 0x05
 	MessageTypeSerialAPIGetCapabilities          = 0x07
 	MessageTypeZWSendData                        = 0x13
+	MessageTypeGetVersion                        = 0x15
+	MessageTypeMemoryGetID                       = 0x20
 	MessageTypeZWGetNodeProtocolInfo             = 0x41
 	MessageTypeZWApplicationUpdate               = 0x49
+	MessageTypeZWRequestNodeInfo                 = 0x60
 )
 
 // Transmit Option
@@ -60,31 +44,87 @@ const (
 // Transmit Complete
 const (
 	TransmitCompleteOK      uint8 = 0x00
-	TransmitCompleteNoAck         = 0x01
+	TransmitCompleteNoACK         = 0x01
 	TransmitCompleteFail          = 0x02
 	TransmitCompleteNotIdle       = 0x03
 	TransmitCompleteNoRoute       = 0x04
 )
 
+// Library Type
+const (
+	LibraryTypeControllerStatic uint8 = 0x01
+	LibraryTypeController             = 0x02
+	LibraryTypeSlaveEnhanced          = 0x03
+	LibraryTypeSlave                  = 0x04
+	LibraryTypeInstaller              = 0x05
+	LibraryTypeSlaveRouting           = 0x06
+	LibraryTypeControllerBridge       = 0x07
+	LibraryTypeDUT                    = 0x08
+	LibraryTypeAVRemote               = 0x0a
+	LibraryTypeAVDevice               = 0x0b
+)
+
+// ZWApplicationUpdate Status meaning
+const (
+	ZWApplicationUpdateStateSUCID         uint8 = 0x10
+	ZWApplicationUpdateStateDeleteDone          = 0x20
+	ZWApplicationUpdateStateNewIDAssigned       = 0x40
+	ZWApplicationUpdateStateRoutePending        = 0x80
+	ZWApplicationUpdateStateRequestFailed       = 0x81
+	ZWApplicationUpdateStateRequestDone         = 0x82
+	ZWApplicationUpdateStateReceived            = 0x84
+)
+
+// ApplicationCommandHandler information
+type ApplicationCommandHandler struct {
+	Status uint8
+	NodeID uint8
+	Body   []uint8
+}
+
+// GetVersion information
+type GetVersion struct {
+	Info        string
+	LibraryType uint8
+}
+
+// MemoryGetID informationZ
+type MemoryGetID struct {
+	HomeID uint32
+	NodeID uint8
+}
+
 // SerialAPIGetInitData information
 type SerialAPIGetInitData struct {
 	Version      uint8
 	Capabilities struct {
+		Slave        bool
+		TimerSupport bool
 		Secondary    bool
 		StaticUpdate bool
 	}
-	Nodes []uint8 // List of nodes on the network
+	Nodes []uint8
 }
 
 // SerialAPIGetCapabilities information
 type SerialAPIGetCapabilities struct {
-	Version      uint16
+	Application struct {
+		Version  uint8
+		Revision uint8
+	}
 	Manufacturer uint16
 	Product      struct {
 		Type uint16
 		ID   uint16
 	}
 	MessageTypes []uint8
+}
+
+// ZWApplicationUpdate information
+type ZWApplicationUpdate struct {
+	Status uint8
+	NodeID uint8
+	Body   []uint8
 }
 
 // ZWGetControllerCapabilities information
@@ -108,41 +148,18 @@ type ZWGetNodeProtocolInfo struct {
 	}
 }
 
+// ZWRequestNodeInfo information
+type ZWRequestNodeInfo struct {
+	Status uint8
+}
+
 // ZWSendData information
 type ZWSendData struct {
-	NodeID          uint8
-	CommandClass    uint8
-	Payload         []uint8
-	TransmitOptions struct {
-		ACK       bool
-		LowPower  bool
-		AutoRoute bool
-		NoRoute   bool
-		Explore   bool
-	}
 	CallbackID uint8
+	Status     uint8
 }
 
 // IsValidNodeID checks if the nodeID is in the valid range of nodes
 func IsValidNodeID(nodeID uint8) bool {
 	return nodeID > 0 && nodeID < 233
-}
-
-// SetTransmitOptionsMask takes the options byte and sets the individual bool
-// flags of ZWSendData.TransmitOptions
-func (message *ZWSendData) SetTransmitOptionsMask(options uint8) error {
-	fullMask := (TransmitOptionACK | TransmitOptionLowPower |
-		TransmitOptionAutoRoute | TransmitOptionNoRoute | TransmitOptionExplore)
-
-	if (fullMask & options) != options {
-		return fmt.Errorf("Options contains unknown bits: 0x%02x", options)
-	}
-
-	message.TransmitOptions.ACK = (options & TransmitOptionACK) != 0
-	message.TransmitOptions.LowPower = (options & TransmitOptionLowPower) != 0
-	message.TransmitOptions.AutoRoute = (options & TransmitOptionAutoRoute) != 0
-	message.TransmitOptions.NoRoute = (options & TransmitOptionNoRoute) != 0
-	message.TransmitOptions.Explore = (options & TransmitOptionExplore) != 0
-
-	return nil
 }

@@ -21,6 +21,32 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
+// GetVersionRequest creates a GetVersion request packet
+func GetVersionRequest() *packet.Packet {
+	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
+		PacketType:  packet.PacketTypeRequest,
+		MessageType: MessageTypeGetVersion}
+
+	if err := p.Update(); err != nil {
+		panic(fmt.Sprintf("This should never fail: %v", err))
+	}
+
+	return &p
+}
+
+// MemoryGetIDRequest creates a MemoryGetID request packet
+func MemoryGetIDRequest() *packet.Packet {
+	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
+		PacketType:  packet.PacketTypeRequest,
+		MessageType: MessageTypeMemoryGetID}
+
+	if err := p.Update(); err != nil {
+		panic(fmt.Sprintf("This should never fail: %v", err))
+	}
+
+	return &p
+}
+
 // SerialAPIGetInitDataRequest creates a SerialAPIGetInitData request packet
 func SerialAPIGetInitDataRequest() *packet.Packet {
 	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
@@ -81,71 +107,46 @@ func ZWGetNodeProtocolInfoRequest(nodeID uint8) (*packet.Packet, error) {
 	return &p, nil
 }
 
-// ZWSendDataGetRequest creates a ZWSendData Get request packet
-func ZWSendDataGetRequest(nodeID uint8, transmitOptions uint8, callbackID uint8) (*packet.Packet, error) {
-
-	message := ZWSendData{}
-	message.NodeID = nodeID
-	message.CommandClass = CommandClassBasic
-	message.Payload = []uint8{BasicCommandGet}
-	if err := message.SetTransmitOptionsMask(transmitOptions); err != nil {
-		return nil, err
+// ZWRequestNodeInfoRequest creates a MessageTypeZWRequestNodeInfo
+// request packet
+func ZWRequestNodeInfoRequest(nodeID uint8) (*packet.Packet, error) {
+	if !IsValidNodeID(nodeID) {
+		return nil, fmt.Errorf("Invalid nodeID: 0x%02x", nodeID)
 	}
-	message.CallbackID = callbackID
 
-	return ZWSendDataToRequestPacket(&message)
+	p := packet.Packet{Preamble: packet.PacketPreambleSOF,
+		PacketType:  packet.PacketTypeRequest,
+		MessageType: MessageTypeZWRequestNodeInfo,
+		Body:        []uint8{nodeID}}
+
+	if err := p.Update(); err != nil {
+		panic(fmt.Sprintf("This should never fail: %v", err))
+	}
+
+	return &p, nil
 }
 
-// ZWSendDataSetRequest creates a ZWSendData Set request packet
-func ZWSendDataSetRequest(nodeID uint8, value uint8, transmitOptions uint8, callbackID uint8) (*packet.Packet, error) {
+// ZWSendDataRequest creates a ZWSendData request packet
+func ZWSendDataRequest(nodeID uint8, commandClass uint8, payload []uint8,
+	transmitOptions uint8, callbackID uint8) (*packet.Packet, error) {
 
-	message := ZWSendData{}
-	message.NodeID = nodeID
-	message.CommandClass = CommandClassBasic
-	message.Payload = []uint8{BasicCommandSet, value}
-	if err := message.SetTransmitOptionsMask(transmitOptions); err != nil {
-		return nil, err
+	if !IsValidNodeID(nodeID) {
+		return nil, fmt.Errorf("Invalid nodeID: 0x%02x", nodeID)
 	}
-	message.CallbackID = callbackID
 
-	return ZWSendDataToRequestPacket(&message)
-}
-
-// ZWSendDataToRequestPacket creates a ZWSendData request packet
-func ZWSendDataToRequestPacket(message *ZWSendData) (*packet.Packet, error) {
 	p := packet.Packet{}
 	p.Preamble = packet.PacketPreambleSOF
 	p.PacketType = packet.PacketTypeRequest
 	p.MessageType = MessageTypeZWSendData
 
-	transmitOptions := uint8(0)
-	if message.TransmitOptions.ACK {
-		transmitOptions |= TransmitOptionACK
-	}
-
-	if message.TransmitOptions.LowPower {
-		transmitOptions |= TransmitOptionLowPower
-	}
-
-	if message.TransmitOptions.AutoRoute {
-		transmitOptions |= TransmitOptionAutoRoute
-	}
-
-	if message.TransmitOptions.NoRoute {
-		transmitOptions |= TransmitOptionNoRoute
-	}
-
-	if message.TransmitOptions.Explore {
-		transmitOptions |= TransmitOptionExplore
-	}
-
-	// Body: | NODE_ID | LENGTH_OF_PAYLOAD  + 1 | COMMAND_CLASS |
+	// Body: | NODE_ID | LENGTH_OF_PAYLOAD + 1 | COMMAND_CLASS |
 	//       | PAYLOAD | TRANSMIT_OPTIONS | CALLBACK_ID |
-	data := []uint8{message.NodeID, 1 + uint8(len(message.Payload)),
-		message.CommandClass}
-	data = append(data, message.Payload...)
-	if message.CallbackID != 0 {
-		data = append(data, message.CallbackID)
+	data := []uint8{nodeID, 1 + uint8(len(payload)), commandClass}
+	data = append(data, payload...)
+	data = append(data, transmitOptions)
+	// TODO: is this accurate?
+	if callbackID != 0 {
+		data = append(data, callbackID)
 	}
 	p.Body = data
 
