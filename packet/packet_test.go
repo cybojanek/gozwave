@@ -235,8 +235,27 @@ func TestPacket(t *testing.T) {
 		t.Errorf("Expected nil packet: %v and non nil error: %v", p, err)
 	}
 
+	// Test bad Preamble
+	badPacket := Packet{Preamble: 0x23}
+	if err := badPacket.Update(); err == nil {
+		t.Errorf("Expected non nil error")
+	}
+	if bytes, err := badPacket.Bytes(); bytes != nil || err == nil {
+		t.Errorf("Expected nil bytes: %v and non nil error: %v", bytes, err)
+	}
+	badPacket.Preamble = PacketPreambleSOF
+
+	// Test bad PacketType
+	badPacket.PacketType = 0x23
+	if err := badPacket.Update(); err == nil {
+		t.Errorf("Expected non nil error")
+	}
+	if bytes, err := badPacket.Bytes(); bytes != nil || err == nil {
+		t.Errorf("Expected nil bytes: %v and non nil error: %v", bytes, err)
+	}
+	badPacket.PacketType = PacketTypeRequest
+
 	// Test packet body too long
-	badPacket := Packet{Preamble: PacketPreambleSOF}
 	for i := 0; i <= 0xff-3; i++ {
 		badPacket.Body = append(badPacket.Body, 0x00)
 	}

@@ -77,7 +77,7 @@ func (packet *Packet) Copy() *Packet {
 	return &p
 }
 
-// Get String representation of a packet
+// String representation of a packet
 func (packet *Packet) String() string {
 	stringBytes := make([]string, len(packet.Body))
 	for i, x := range packet.Body {
@@ -115,12 +115,25 @@ func (packet *Packet) Bytes() ([]byte, error) {
 // Update the length and checksum of the packet based on the other fields.
 // Errors if body is too long.
 func (packet *Packet) Update() error {
-	// These don't have a length nor checksum
+	// Check Preamble
 	switch packet.Preamble {
 	case PacketPreambleACK, PacketPreambleNAK, PacketPreambleCAN:
 		return nil
+	case PacketPreambleSOF:
+		// Pass
+	default:
+		return fmt.Errorf("Bad PacketPreamble: 0x%02x", packet.Preamble)
 	}
 
+	// Check PacketType
+	switch packet.PacketType {
+	case PacketTypeRequest, PacketTypeResponse:
+		// Pass
+	default:
+		return fmt.Errorf("Bad PacketType: 0x%02x", packet.PacketType)
+	}
+
+	// Check Length
 	if len(packet.Body) > 0xff-3 {
 		return fmt.Errorf("Packet Body is too long: %d > %d", len(packet.Body), 0xff-3)
 	}
