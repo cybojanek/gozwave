@@ -47,7 +47,7 @@ type Controller struct {
 
 	lastCallbackID   uint8                   // Next ZWSendData callback id
 	mutex            sync.Mutex              // Controller mutex
-	callbackChannel  *chan *packet.Packet    // Callback channel
+	callbackChannel  chan *packet.Packet     // Callback channel
 	serial           *serial.Port            // Serial port connection
 	responses        chan *packet.Packet     // Channel for packets read from serial
 	requests         chan *controllerRequest // Channel for outgoing requests
@@ -79,34 +79,7 @@ const serialPortReadTimeout = (1 * time.Second)
 var ackBytes = []uint8{packet.PacketPreambleACK, '\n'}
 var nakBytes = []uint8{packet.PacketPreambleNAK, '\n'}
 
-// Write all bytes to the serial device
-func (controller *Controller) writeFully(b []byte) error {
-	written := 0
-	for written < len(b) {
-		n, err := controller.serial.Write(b[written:])
-		if err != nil {
-			log.Printf("ERROR writeFully error: %v", err)
-			return err
-		}
-		written += n
-	}
-	return nil
-}
-
-// routeRespones routes a packet to a callback channel
-func (controller *Controller) routeReponse(packet *packet.Packet) {
-	controller.mutex.Lock()
-	defer controller.mutex.Unlock()
-
-	// NOTE: extract to local variable to not refernce controller in goroutine
-	channel := controller.callbackChannel
-	if channel != nil {
-		// Call in goroutine to avoid deadlock in Controller
-		go func() {
-			*channel <- packet.Copy()
-		}()
-	}
-}
+////////////////////////////////////////////////////////////////////////////////
 
 // Read from serial device and forward parsed packets to controller.responses
 func (controller *Controller) doResponses() {
@@ -153,14 +126,49 @@ func (controller *Controller) doResponses() {
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// Write all bytes to the serial device
+// Assumptions: called only from doRequests
+func (controller *Controller) writeFully(b []byte) error {
+	written := 0
+	for written < len(b) {
+		n, err := controller.serial.Write(b[written:])
+		if err != nil {
+			log.Printf("ERROR writeFully error: %v", err)
+			return err
+		}
+		written += n
+	}
+	return nil
+}
+
+// Get the callback ID to use for the next request
+// Assumptions: called only from doRequests
 func (controller *Controller) getCallbackID() uint8 {
-	if controller.lastCallbackID >= callbackIDMax {
+	if controller.lastCallbackID >= callbackIDMax || controller.lastCallbackID < callbackIDMin {
 		controller.lastCallbackID = callbackIDMin
 	}
 
 	ret := controller.lastCallbackID
 	controller.lastCallbackID++
 	return ret
+}
+
+// routeRespones routes a packet to a callback channel
+// NOTE: goroutine safe, acquires controller lock
+func (controller *Controller) routeReponse(packet *packet.Packet) {
+	controller.mutex.Lock()
+	defer controller.mutex.Unlock()
+
+	// NOTE: extract to local variable to not refernce controller in goroutine
+	channel := controller.callbackChannel
+	if channel != nil {
+		// Call in goroutine to avoid deadlock in Controller
+		go func() {
+			channel <- packet.Copy()
+		}()
+	}
 }
 
 // Process controller.requests and controller.responses
@@ -485,7 +493,9 @@ func (controller *Controller) doRequests() {
 	}
 }
 
-// BlockingRequest issues a request and awaits a response
+////////////////////////////////////////////////////////////////////////////////
+
+// BlockingRequest issues a request and awaits a response. goroutine safe.
 func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.Packet, error) {
 	if request.Preamble != packet.PacketPreambleSOF {
 		return nil, fmt.Errorf("Packet has non SOF Preamble: 0x%02x",
@@ -535,20 +545,24 @@ func (controller *Controller) BlockingRequest(request *packet.Packet) (*packet.P
 	return controllerRequest.Response, controllerRequest.Err
 }
 
-// SetCallbackChannel set the channel to the callback list, can be null
-func (controller *Controller) SetCallbackChannel(channel *chan *packet.Packet) {
+// SetCallbackChannel set the channel to the callback list, can be null.
+// goroutine safe.
+func (controller *Controller) SetCallbackChannel(channel chan *packet.Packet) {
 	controller.mutex.Lock()
 	defer controller.mutex.Unlock()
 
 	controller.callbackChannel = channel
 }
 
-// isOpen is an private function that does not acquire the controller mutex
+////////////////////////////////////////////////////////////////////////////////
+
+// isOpen is an private function that does not acquire the controller mutex.
+// NOTE: not goroutine safe, caller must hold controller.mutex
 func (controller *Controller) isOpen() bool {
 	return controller.serial != nil
 }
 
-// Open controller
+// Open controller. goroutine safe.
 func (controller *Controller) Open() error {
 	controller.mutex.Lock()
 	defer controller.mutex.Unlock()
@@ -588,7 +602,7 @@ func (controller *Controller) Open() error {
 	return nil
 }
 
-// Close controller
+// Close controller. goroutine safe.
 func (controller *Controller) Close() error {
 	controller.mutex.Lock()
 	defer controller.mutex.Unlock()
