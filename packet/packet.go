@@ -1,4 +1,4 @@
-// Package packet parses and serializes ZWave packets from/to binary bytes
+// Package packet encodes and decodes ZWave packets from/to binary bytes
 package packet
 
 /*
@@ -70,9 +70,7 @@ func (packet *Packet) Copy() *Packet {
 		PacketType: packet.PacketType, MessageType: packet.MessageType,
 		Body: make([]uint8, len(packet.Body)), Checksum: packet.Checksum}
 
-	for i, b := range packet.Body {
-		p.Body[i] = b
-	}
+	copy(p.Body, packet.Body)
 
 	return &p
 }
