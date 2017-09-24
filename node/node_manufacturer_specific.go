@@ -1,4 +1,4 @@
-package api
+package node
 
 /*
 Copyright (C) 2017 Jan Kasiak

@@ -21,17 +21,10 @@ import (
 	"fmt"
 	"github.com/cybojanek/gozwave/controller"
 	"github.com/cybojanek/gozwave/message"
+	"github.com/cybojanek/gozwave/node"
 	"github.com/cybojanek/gozwave/packet"
 	"log"
 	"sync"
-)
-
-var (
-	// ErrNodeNotFound is returned in case of node not found
-	ErrNodeNotFound = errors.New("Node not found")
-	// DefaultTransmitOptions for ZW Send Data commands
-	DefaultTransmitOptions = (message.TransmitOptionACK |
-		message.TransmitOptionAutoRoute | message.TransmitOptionExplore)
 )
 
 // ZWAPI instance
@@ -42,7 +35,7 @@ type ZWAPI struct {
 	mutex                 sync.RWMutex           // API mutex
 	homeID                uint32                 // ID of ZWave network
 	supportedMessageTypes []uint8                // Supported message types
-	nodes                 map[uint8]*Node        // Nodes
+	nodes                 map[uint8]*node.Node   // Nodes
 	nodexMutex            sync.RWMutex           // Nodes mutex
 	con                   *controller.Controller // Cntroller
 	defaultChannel        chan *packet.Packet    // Channel for receiving async controller packets
@@ -81,7 +74,7 @@ func (api *ZWAPI) Open() error {
 
 		con.SetCallbackChannel(api.defaultChannel)
 
-		api.nodes = make(map[uint8]*Node)
+		api.nodes = make(map[uint8]*node.Node)
 	}
 
 	// Start callback handler
@@ -179,10 +172,10 @@ func (api *ZWAPI) Initialize() error {
 		if id == memoryID.NodeID {
 			continue
 		}
-		node, ok := api.nodes[id]
+		n, ok := api.nodes[id]
 		if !ok {
-			node = &Node{ID: id, api: api}
-			api.nodes[id] = node
+			n = node.MakeNode(id, api)
+			api.nodes[id] = n
 		}
 	}
 
@@ -250,7 +243,7 @@ func (api *ZWAPI) initialZWGetControllerCapabilities() (*message.ZWGetController
 ////////////////////////////////////////////////////////////////////////////////
 
 // GetNode returns the node or nil if doesn't exist. goroutine safe.
-func (api *ZWAPI) GetNode(nodeID uint8) *Node {
+func (api *ZWAPI) GetNode(nodeID uint8) *node.Node {
 	api.mutex.RLock()
 	defer api.mutex.RUnlock()
 
@@ -262,11 +255,11 @@ func (api *ZWAPI) GetNode(nodeID uint8) *Node {
 }
 
 // GetNodes returns a list copy of all the nodes. goroutine safe.
-func (api *ZWAPI) GetNodes() []*Node {
+func (api *ZWAPI) GetNodes() []*node.Node {
 	api.mutex.RLock()
 	defer api.mutex.RUnlock()
 
-	nodeList := make([]*Node, len(api.nodes))
+	nodeList := make([]*node.Node, len(api.nodes))
 
 	i := 0
 	for _, v := range api.nodes {
@@ -303,7 +296,7 @@ func (api *ZWAPI) defaultHandler() {
 							response.NodeID, response)
 					} else {
 						go func() {
-							node.applicationCommandHandler(response)
+							node.ApplicationCommandHandler(response)
 						}()
 					}
 				}
@@ -319,7 +312,7 @@ func (api *ZWAPI) defaultHandler() {
 							response.NodeID, response)
 					} else {
 						go func() {
-							node.applicationUpdateHandler(response)
+							node.ApplicationUpdateHandler(response)
 						}()
 					}
 				} else {
@@ -341,8 +334,8 @@ func (api *ZWAPI) defaultHandler() {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-// Sending a blocking request and wait for a reply
-func (api *ZWAPI) blockingRequest(request *packet.Packet) (*packet.Packet, error) {
+// BlockingRequest sends a request and awaits a response
+func (api *ZWAPI) BlockingRequest(request *packet.Packet) (*packet.Packet, error) {
 	api.mutex.RLock()
 	defer api.mutex.RUnlock()
 
@@ -370,77 +363,4 @@ func (api *ZWAPI) blockingRequest(request *packet.Packet) (*packet.Packet, error
 	}
 
 	return api.con.BlockingRequest(request)
-}
-
-// zWGetNodeProtocolInfo gets the message.ZWGetNodeProtocolInfo information
-// for a requested node. Returns ErrNodeNotFound if the request node could not
-// be found by the controller.
-func (api *ZWAPI) zWGetNodeProtocolInfo(nodeID uint8) (*message.ZWGetNodeProtocolInfo, error) {
-	requestPacket, err := message.ZWGetNodeProtocolInfoRequest(nodeID)
-	if err != nil {
-		return nil, err
-	}
-	responsePacket, err := api.blockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	responseMessage, err := message.ZWGetNodeProtocolInfoResponse(responsePacket)
-	if err != nil {
-		return responseMessage, err
-	}
-
-	// Check node exists
-	if responseMessage.DeviceClass.Generic == 0 {
-		return nil, ErrNodeNotFound
-	}
-	return responseMessage, nil
-}
-
-// zWSendData sends the ZWSendData request to a given node
-func (api *ZWAPI) zWSendData(nodeID uint8, commandClass uint8, payload []uint8) error {
-	requestPacket, err := message.ZWSendDataRequest(nodeID, commandClass, payload,
-		DefaultTransmitOptions, 0x00)
-	if err != nil {
-		return err
-	}
-	responsePacket, err := api.blockingRequest(requestPacket)
-	if err != nil {
-		return err
-	}
-	responseMessage, err := message.ZWSendDataResponse(responsePacket)
-	if err != nil {
-		return err
-	}
-
-	if responseMessage.Status != message.TransmitCompleteOK {
-		return fmt.Errorf("ZWSendData failed to contact node: 0x%02x",
-			responseMessage.Status)
-	}
-
-	if api.DebugLogging {
-		log.Printf("DEBUG ZWSendData: %+v", responseMessage)
-	}
-	return nil
-}
-
-// zWRequestNodeInfo gets the message.ZWRequestNodeInfo information for a
-// requested node.
-func (api *ZWAPI) zWRequestNodeInfo(nodeID uint8) error {
-	requestPacket, err := message.ZWRequestNodeInfoRequest(nodeID)
-	if err != nil {
-		return err
-	}
-	responsePacket, err := api.blockingRequest(requestPacket)
-	if err != nil {
-		return err
-	}
-	responseMessage, err := message.ZWRequestNodeInfoResponse(responsePacket)
-	if err != nil {
-		return err
-	}
-
-	if responseMessage.Status != 1 {
-		return fmt.Errorf("Bad ZWRequestNodeInfo reply: %d", responseMessage.Status)
-	}
-	return nil
 }

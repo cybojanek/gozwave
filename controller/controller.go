@@ -32,6 +32,11 @@ import (
 	"time"
 )
 
+// RequestProcessor processes a ZWave packet and returns a response
+type RequestProcessor interface {
+	BlockingRequest(request *packet.Packet) (*packet.Packet, error)
+}
+
 // A request to the controller
 type controllerRequest struct {
 	Request  *packet.Packet // Request Packet

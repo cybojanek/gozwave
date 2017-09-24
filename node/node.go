@@ -1,4 +1,5 @@
-package api
+// Package node represents a ZWave node attached to a controller
+package node
 
 /*
 Copyright (C) 2017 Jan Kasiak
@@ -17,12 +18,22 @@ limitations under the License.
 */
 
 import (
+	"errors"
 	"fmt"
+	"github.com/cybojanek/gozwave/controller"
 	"github.com/cybojanek/gozwave/device"
 	"github.com/cybojanek/gozwave/message"
 	"log"
 	"sync"
 	"time"
+)
+
+var (
+	// ErrNodeNotFound is returned in case of node not found
+	ErrNodeNotFound = errors.New("Node not found")
+	// DefaultTransmitOptions for ZW Send Data commands
+	DefaultTransmitOptions = (message.TransmitOptionACK |
+		message.TransmitOptionAutoRoute | message.TransmitOptionExplore)
 )
 
 const responseTimeout = (10 * time.Second)
@@ -47,8 +58,8 @@ type Node struct {
 		typ uint16 // Product Type
 	}
 
-	api   *ZWAPI       // Reference to parent api
-	mutex sync.RWMutex // Node mutex
+	api   controller.RequestProcessor // Reference to parent api
+	mutex sync.RWMutex                // Node mutex
 
 	requestNodeInfoComplete chan int // Temporary channel used during refresh
 
@@ -67,6 +78,11 @@ type ApplicationCommandData struct {
 	}
 }
 
+// MakeNode makes a new node
+func MakeNode(nodeID uint8, controller controller.RequestProcessor) *Node {
+	return &Node{ID: nodeID, api: controller}
+}
+
 // commandClassIDsToMapKey returns the 16 bit key to use for callback maps
 func commandClassIDsToMapKey(commandClassID uint8, commandID uint8) uint16 {
 	return (uint16(commandClassID) << 8) | (uint16(commandID))
@@ -78,7 +94,7 @@ func (node *Node) Refresh() error {
 	node.mutex.Lock()
 
 	// Contact controller to get device description
-	nodeProtocolInfo, err := node.api.zWGetNodeProtocolInfo(node.ID)
+	nodeProtocolInfo, err := node.zWGetNodeProtocolInfo()
 	if err != nil {
 		node.mutex.Unlock()
 		return err
@@ -96,7 +112,7 @@ func (node *Node) Refresh() error {
 		channelA := make(chan int, 1)
 		// FIXME: this is not goroutine safe and multiple Refresh could stall...
 		node.requestNodeInfoComplete = channelA
-		if err := node.api.zWRequestNodeInfo(node.ID); err != nil {
+		if err := node.zWRequestNodeInfo(); err != nil {
 			node.mutex.Unlock()
 			return err
 		}
@@ -133,14 +149,15 @@ func (node *Node) Refresh() error {
 	return nil
 }
 
-func (node *Node) applicationCommandHandler(command *message.ApplicationCommand) {
-	log.Printf("DEBUG applicationCommandHandler: node: %d command: %+v", node.ID, command)
+// ApplicationCommandHandler function
+func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand) {
+	log.Printf("DEBUG ApplicationCommandHandler: node: %d command: %+v", node.ID, command)
 
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
 	if len(command.Body) < 2 {
-		log.Printf("ERROR applicationCommandHandler: command is too short: %d", len(command.Body))
+		log.Printf("ERROR ApplicationCommandHandler: command is too short: %d", len(command.Body))
 		return
 	}
 
@@ -190,8 +207,9 @@ func (node *Node) applicationCommandHandler(command *message.ApplicationCommand)
 	}
 }
 
-func (node *Node) applicationUpdateHandler(update *message.ZWApplicationUpdate) {
-	log.Printf("DEBUG applicationUpdateHandler: node: %d update: %+v", node.ID, update)
+// ApplicationUpdateHandler function
+func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) {
+	log.Printf("DEBUG ApplicationUpdateHandler: node: %d update: %+v", node.ID, update)
 
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
@@ -273,10 +291,83 @@ func (node *Node) getOneShotCallbackChannel(commandClassID uint8, commandID uint
 	return channel
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// zWGetNodeProtocolInfo gets the message.ZWGetNodeProtocolInfo information
+// for a requested node. Returns ErrNodeNotFound if the request node could not
+// be found by the controller.
+func (node *Node) zWGetNodeProtocolInfo() (*message.ZWGetNodeProtocolInfo, error) {
+	requestPacket, err := message.ZWGetNodeProtocolInfoRequest(node.ID)
+	if err != nil {
+		return nil, err
+	}
+	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	responseMessage, err := message.ZWGetNodeProtocolInfoResponse(responsePacket)
+	if err != nil {
+		return responseMessage, err
+	}
+
+	// Check node exists
+	if responseMessage.DeviceClass.Generic == 0 {
+		return nil, ErrNodeNotFound
+	}
+	return responseMessage, nil
+}
+
+// zWRequestNodeInfo gets the message.ZWRequestNodeInfo information for a
+// requested node.
+func (node *Node) zWRequestNodeInfo() error {
+	requestPacket, err := message.ZWRequestNodeInfoRequest(node.ID)
+	if err != nil {
+		return err
+	}
+	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	if err != nil {
+		return err
+	}
+	responseMessage, err := message.ZWRequestNodeInfoResponse(responsePacket)
+	if err != nil {
+		return err
+	}
+
+	if responseMessage.Status != 1 {
+		return fmt.Errorf("Bad ZWRequestNodeInfo reply: %d", responseMessage.Status)
+	}
+
+	return nil
+}
+
+// zWSendData sends the ZWSendData request to a given node
+func (node *Node) zWSendData(commandClass uint8, payload []uint8) error {
+	requestPacket, err := message.ZWSendDataRequest(node.ID, commandClass, payload,
+		DefaultTransmitOptions, 0x00)
+	if err != nil {
+		return err
+	}
+	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	if err != nil {
+		return err
+	}
+	responseMessage, err := message.ZWSendDataResponse(responsePacket)
+	if err != nil {
+		return err
+	}
+
+	if responseMessage.Status != message.TransmitCompleteOK {
+		return fmt.Errorf("ZWSendData failed to contact node: 0x%02x",
+			responseMessage.Status)
+	}
+
+	return nil
+}
+
 func (node *Node) zwSendDataRequest(commandClass uint8, data []uint8) error {
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
-	if err := node.api.zWSendData(node.ID, commandClass, data); err != nil {
+	if err := node.zWSendData(commandClass, data); err != nil {
 		return err
 	}
 	return nil
@@ -287,7 +378,7 @@ func (node *Node) zwSendDataWaitForResponse(commandClass uint8, data []uint8, co
 
 	channel := node.getOneShotCallbackChannel(commandClass, command)
 
-	if err := node.api.zWSendData(node.ID, commandClass, data); err != nil {
+	if err := node.zWSendData(commandClass, data); err != nil {
 		node.mutex.Unlock()
 		return nil, err
 	}
