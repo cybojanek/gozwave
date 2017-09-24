@@ -50,6 +50,13 @@ type ZWAPI struct {
 	stoppedDefaultHandler chan int               // Exit confirmation channel for defaultHandler
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
+// isOpen checks if the api is open, must we called with api lock
+func (api *ZWAPI) isOpen() bool {
+	return api.con != nil
+}
+
 // Open api. goroutine safe.
 func (api *ZWAPI) Open() error {
 	api.mutex.Lock()
@@ -72,7 +79,7 @@ func (api *ZWAPI) Open() error {
 		api.stopDefaultHandler = make(chan int)
 		api.stoppedDefaultHandler = make(chan int)
 
-		con.SetCallbackChannel(&api.defaultChannel)
+		con.SetCallbackChannel(api.defaultChannel)
 
 		api.nodes = make(map[uint8]*Node)
 	}
@@ -116,6 +123,8 @@ loop:
 	return err
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Initialize serial controller and node list. goroutine safe.
 func (api *ZWAPI) Initialize() error {
 	api.mutex.Lock()
@@ -126,7 +135,7 @@ func (api *ZWAPI) Initialize() error {
 	// NOTE: only use internal functions to prevent mutex deadlock
 
 	// SerialAPIGetCapabilities
-	capabilities, err := api.internalSerialAPIGetCapabilities()
+	capabilities, err := api.initialSerialAPIGetCapabilities()
 	if err != nil {
 		return err
 	}
@@ -134,13 +143,13 @@ func (api *ZWAPI) Initialize() error {
 	api.supportedMessageTypes = capabilities.MessageTypes
 
 	// GetVersion
-	version, err := api.internalGetVersion()
+	version, err := api.initialGetVersion()
 	if err != nil {
 		return err
 	}
 
 	// GetMemoryID
-	memoryID, err := api.internalGetMemoryID()
+	memoryID, err := api.initialGetMemoryID()
 	if err != nil {
 		return err
 	}
@@ -152,7 +161,7 @@ func (api *ZWAPI) Initialize() error {
 	api.homeID = memoryID.HomeID
 
 	// SerialAPIGetInitData
-	initData, err := api.internalSerialAPIGetInitData()
+	initData, err := api.initialSerialAPIGetInitData()
 	if err != nil {
 		return err
 	}
@@ -182,6 +191,76 @@ func (api *ZWAPI) Initialize() error {
 	return nil
 }
 
+// getVersion gets the message.GetVersion information
+// Assumption: called only from Initialize
+func (api *ZWAPI) initialGetVersion() (*message.GetVersion, error) {
+	requestPacket := message.GetVersionRequest()
+	responsePacket, err := api.con.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	return message.GetVersionResponse(responsePacket)
+}
+
+// getMemoryID gets thes message.MemoryGetID information
+// Assumption: called only from Initialize
+func (api *ZWAPI) initialGetMemoryID() (*message.MemoryGetID, error) {
+	requestPacket := message.MemoryGetIDRequest()
+	responsePacket, err := api.con.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	return message.MemoryGetIDResponse(responsePacket)
+}
+
+// serialAPIGetCapabilities gets thes message.SerialAPIGetCapabilities information
+// Assumption: called only from Initialize
+func (api *ZWAPI) initialSerialAPIGetCapabilities() (*message.SerialAPIGetCapabilities, error) {
+	requestPacket := message.SerialAPIGetCapabilitiesRequest()
+	responsePacket, err := api.con.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	return message.SerialAPIGetCapabilitiesResponse(responsePacket)
+}
+
+// serialAPIGetInitData gets the message.SerialAPIGetInitData information
+// Assumption: called only from Initialize
+func (api *ZWAPI) initialSerialAPIGetInitData() (*message.SerialAPIGetInitData, error) {
+	requestPacket := message.SerialAPIGetInitDataRequest()
+	responsePacket, err := api.con.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	return message.SerialAPIGetInitDataResponse(responsePacket)
+}
+
+// zWGetControllerCapabilities gets the message.ZWGetControllerCapabilities
+// information
+// Assumption: called only from Initialize
+func (api *ZWAPI) initialZWGetControllerCapabilities() (*message.ZWGetControllerCapabilities, error) {
+	requestPacket := message.ZWGetControllerCapabilitiesRequest()
+	responsePacket, err := api.con.BlockingRequest(requestPacket)
+	if err != nil {
+		return nil, err
+	}
+	return message.ZWGetControllerCapabilitiesResponse(responsePacket)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// GetNode returns the node or nil if doesn't exist. goroutine safe.
+func (api *ZWAPI) GetNode(nodeID uint8) *Node {
+	api.mutex.RLock()
+	defer api.mutex.RUnlock()
+
+	node, ok := api.nodes[nodeID]
+	if ok {
+		return node
+	}
+	return nil
+}
+
 // GetNodes returns a list copy of all the nodes. goroutine safe.
 func (api *ZWAPI) GetNodes() []*Node {
 	api.mutex.RLock()
@@ -198,17 +277,7 @@ func (api *ZWAPI) GetNodes() []*Node {
 	return nodeList
 }
 
-// GetNode returns the node or nil if doesn't exist. goroutine safe.
-func (api *ZWAPI) GetNode(nodeID uint8) *Node {
-	api.mutex.RLock()
-	defer api.mutex.RUnlock()
-
-	node, ok := api.nodes[nodeID]
-	if ok {
-		return node
-	}
-	return nil
-}
+////////////////////////////////////////////////////////////////////////////////
 
 // Callback for asynchronous messages
 func (api *ZWAPI) defaultHandler() {
@@ -223,14 +292,14 @@ func (api *ZWAPI) defaultHandler() {
 			// Route based on Message Type
 			switch packet.MessageType {
 
-			case message.MessageTypeApplicationCommandHandler:
-				response, err := message.ApplicationCommandHandlerResponse(packet)
+			case message.MessageTypeApplicationCommand:
+				response, err := message.ApplicationCommandResponse(packet)
 				if err != nil {
-					log.Printf("ERROR defaultHandler decoding ApplicationCommandHandler: %v", err)
+					log.Printf("ERROR defaultHandler decoding ApplicationCommand: %v", err)
 				} else {
 					node := api.GetNode(response.NodeID)
 					if node == nil {
-						log.Printf("INFO defaultHandler ApplicationCommandHandler no node: %d for %+v",
+						log.Printf("INFO defaultHandler ApplicationCommand no node: %d for %+v",
 							response.NodeID, response)
 					} else {
 						go func() {
@@ -250,7 +319,7 @@ func (api *ZWAPI) defaultHandler() {
 							response.NodeID, response)
 					} else {
 						go func() {
-							node.applicationUpdate(response)
+							node.applicationUpdateHandler(response)
 						}()
 					}
 				} else {
@@ -270,10 +339,7 @@ func (api *ZWAPI) defaultHandler() {
 	}
 }
 
-// isOpen checks if the api is open, should we called with api lock
-func (api *ZWAPI) isOpen() bool {
-	return api.con != nil
-}
+////////////////////////////////////////////////////////////////////////////////
 
 // Sending a blocking request and wait for a reply
 func (api *ZWAPI) blockingRequest(request *packet.Packet) (*packet.Packet, error) {
@@ -304,57 +370,6 @@ func (api *ZWAPI) blockingRequest(request *packet.Packet) (*packet.Packet, error
 	}
 
 	return api.con.BlockingRequest(request)
-}
-
-// getVersion gets the message.GetVersion information
-func (api *ZWAPI) internalGetVersion() (*message.GetVersion, error) {
-	requestPacket := message.GetVersionRequest()
-	responsePacket, err := api.con.BlockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	return message.GetVersionResponse(responsePacket)
-}
-
-// getMemoryID gets thes message.MemoryGetID information
-func (api *ZWAPI) internalGetMemoryID() (*message.MemoryGetID, error) {
-	requestPacket := message.MemoryGetIDRequest()
-	responsePacket, err := api.con.BlockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	return message.MemoryGetIDResponse(responsePacket)
-}
-
-// serialAPIGetCapabilities gets thes message.SerialAPIGetCapabilities information
-func (api *ZWAPI) internalSerialAPIGetCapabilities() (*message.SerialAPIGetCapabilities, error) {
-	requestPacket := message.SerialAPIGetCapabilitiesRequest()
-	responsePacket, err := api.con.BlockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	return message.SerialAPIGetCapabilitiesResponse(responsePacket)
-}
-
-// serialAPIGetInitData gets the message.SerialAPIGetInitData information
-func (api *ZWAPI) internalSerialAPIGetInitData() (*message.SerialAPIGetInitData, error) {
-	requestPacket := message.SerialAPIGetInitDataRequest()
-	responsePacket, err := api.con.BlockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	return message.SerialAPIGetInitDataResponse(responsePacket)
-}
-
-// zWGetControllerCapabilities gets the message.ZWGetControllerCapabilities
-// information
-func (api *ZWAPI) internalZWGetControllerCapabilities() (*message.ZWGetControllerCapabilities, error) {
-	requestPacket := message.ZWGetControllerCapabilitiesRequest()
-	responsePacket, err := api.con.BlockingRequest(requestPacket)
-	if err != nil {
-		return nil, err
-	}
-	return message.ZWGetControllerCapabilitiesResponse(responsePacket)
 }
 
 // zWGetNodeProtocolInfo gets the message.ZWGetNodeProtocolInfo information
@@ -398,7 +413,8 @@ func (api *ZWAPI) zWSendData(nodeID uint8, commandClass uint8, payload []uint8) 
 	}
 
 	if responseMessage.Status != message.TransmitCompleteOK {
-		return fmt.Errorf("Bad ZWSendData reply: 0x%02x", responseMessage.Status)
+		return fmt.Errorf("ZWSendData failed to contact node: 0x%02x",
+			responseMessage.Status)
 	}
 
 	if api.DebugLogging {
@@ -408,8 +424,7 @@ func (api *ZWAPI) zWSendData(nodeID uint8, commandClass uint8, payload []uint8) 
 }
 
 // zWRequestNodeInfo gets the message.ZWRequestNodeInfo information for a
-// requested node. Returns ErrNodeNotFound if the request node could not be
-// found by the controller.
+// requested node.
 func (api *ZWAPI) zWRequestNodeInfo(nodeID uint8) error {
 	requestPacket, err := message.ZWRequestNodeInfoRequest(nodeID)
 	if err != nil {

@@ -94,7 +94,28 @@ func TestAPI(t *testing.T) {
 		}
 	}
 
-	time.Sleep(time.Second * 2)
+	s := api.GetNode(5)
+	bs := s.GetBinarySwitch()
+
+	if err := bs.Off(); err != nil {
+		t.Logf("Failed to turn off node: %v", err)
+	}
+	if isOn, err := bs.IsOn(); err != nil {
+		t.Logf("Failed to check node off: %v", err)
+	} else if isOn {
+		t.Logf("Expected switch to be off")
+	}
+
+	time.Sleep(time.Second * 1)
+
+	if err := bs.On(); err != nil {
+		t.Logf("Failed to turn on node: %v", err)
+	}
+	if isOn, err := bs.IsOn(); err != nil {
+		t.Logf("Failed to check node on: %v", err)
+	} else if !isOn {
+		t.Logf("Expected switch to be on")
+	}
 
 	for _, node := range nodes {
 		t.Logf("Node: %+v", node)

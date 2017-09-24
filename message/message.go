@@ -21,7 +21,7 @@ limitations under the License.
 const (
 	MessageTypeNone                        uint8 = 0x00
 	MessageTypeSerialAPIGetInitData              = 0x02
-	MessageTypeApplicationCommandHandler         = 0x04
+	MessageTypeApplicationCommand                = 0x04
 	MessageTypeZWGetControllerCapabilities       = 0x05
 	MessageTypeSerialAPIGetCapabilities          = 0x07
 	MessageTypeZWSendData                        = 0x13
@@ -75,8 +75,8 @@ const (
 	ZWApplicationUpdateStateReceived            = 0x84
 )
 
-// ApplicationCommandHandler information
-type ApplicationCommandHandler struct {
+// ApplicationCommand information
+type ApplicationCommand struct {
 	Status uint8
 	NodeID uint8
 	Body   []uint8

@@ -1,6 +1,22 @@
 // Package device handles device enumeratio
 package device
 
+/*
+Copyright (C) 2017 Jan Kasiak
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 // Basic Type
 const (
 	BasicTypeController       uint8 = 0x01
@@ -41,8 +57,20 @@ const (
 
 // Command Class
 const (
-	CommandClassNoOperation          uint8 = 0x01
-	CommandClassManufacturerSpecific       = 0x72
-	CommandClassWakeup                     = 0x84
-	CommandClassMark                       = 0xef
+	CommandClassNoOperation                 uint8 = 0x01
+	CommandClassBinarySwitch                      = 0x25
+	CommandClassAllSwitch                         = 0x27
+	CommandClassMeter                             = 0x32
+	CommandClassColorSwitch                       = 0x33
+	CommandClassAssociationGroupInformation       = 0x59
+	CommandClassZwavePlusInfo                     = 0x5e
+	CommandClassConfiguration                     = 0x70
+	CommandClassManufacturerSpecific              = 0x72
+	CommandClassFirmwareUpdateMetadata            = 0x73
+	CommandClassNodeNamingAndLocation             = 0x77
+	CommandClassClock                             = 0x81
+	CommandClassWakeup                            = 0x84
+	CommandClassAssociation                       = 0x85
+	CommandClassVersion                           = 0x86
+	CommandClassMark                              = 0xef
 )

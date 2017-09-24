@@ -23,16 +23,14 @@ import (
 	"github.com/cybojanek/gozwave/packet"
 )
 
-// ApplicationCommandHandlerResponse parses a ApplicationCommandHandler response
+// ApplicationCommandResponse parses a ApplicationCommand response
 // packet
-func ApplicationCommandHandlerResponse(p *packet.Packet) (*ApplicationCommandHandler, error) {
-	if p.MessageType != MessageTypeApplicationCommandHandler {
+func ApplicationCommandResponse(p *packet.Packet) (*ApplicationCommand, error) {
+	if p.MessageType != MessageTypeApplicationCommand {
 		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
-	message := ApplicationCommandHandler{}
-	message.Status = p.Body[0]
-	message.NodeID = p.Body[1]
+	message := ApplicationCommand{Status: p.Body[0], NodeID: p.Body[1]}
 
 	// This should match up to the rest of the packet length
 	payloadLength := p.Body[2]
