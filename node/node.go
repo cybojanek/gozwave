@@ -1,4 +1,4 @@
-// Package node represents a ZWave node attached to a controller
+// Package node represents a ZWave node. All public methods are goroutine safe.
 package node
 
 /*
@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/cybojanek/gozwave/controller"
-	"github.com/cybojanek/gozwave/device"
 	"github.com/cybojanek/gozwave/message"
 	"log"
 	"sync"
@@ -58,17 +57,17 @@ type Node struct {
 		typ uint16 // Product Type
 	}
 
-	api   controller.RequestProcessor // Reference to parent api
-	mutex sync.RWMutex                // Node mutex
+	network controller.Controller // Reference to parent network
+	mutex   sync.RWMutex          // Node mutex
 
 	requestNodeInfoComplete chan int // Temporary channel used during refresh
 
-	oneShotCallbacks map[uint16]map[chan *ApplicationCommandData]chan *ApplicationCommandData // One shot ZWSenData callbacks
-	longCallbacks    map[uint16]map[chan *ApplicationCommandData]chan *ApplicationCommandData // Long ZWSendData callbacks
+	oneShotCallbacks map[uint16]map[chan *applicationCommandData]chan *applicationCommandData // One shot ZWSenData callbacks
+	longCallbacks    map[uint16]map[chan *applicationCommandData]chan *applicationCommandData // Long ZWSendData callbacks
 }
 
-// ApplicationCommandData information
-type ApplicationCommandData struct {
+// applicationCommandData information
+type applicationCommandData struct {
 	Status  uint8 // ??
 	NodeID  uint8 // Source NodeID
 	Command struct {
@@ -79,8 +78,8 @@ type ApplicationCommandData struct {
 }
 
 // MakeNode makes a new node
-func MakeNode(nodeID uint8, controller controller.RequestProcessor) *Node {
-	return &Node{ID: nodeID, api: controller}
+func MakeNode(nodeID uint8, controller controller.Controller) *Node {
+	return &Node{ID: nodeID, network: controller}
 }
 
 // commandClassIDsToMapKey returns the 16 bit key to use for callback maps
@@ -171,7 +170,7 @@ func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand)
 
 	// Loop over oneShotCallbacks and longCallbacks
 	for i := 0; i < 2; i++ {
-		var callbacks map[chan *ApplicationCommandData]chan *ApplicationCommandData
+		var callbacks map[chan *applicationCommandData]chan *applicationCommandData
 		var ok bool
 
 		// Choose map depending on loop
@@ -188,7 +187,7 @@ func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand)
 
 		for _, channel := range callbacks {
 			// Create copy for channel callback
-			data := ApplicationCommandData{Status: command.Status, NodeID: command.NodeID}
+			data := applicationCommandData{Status: command.Status, NodeID: command.NodeID}
 			data.Command.ClassID = commandClassID
 			data.Command.ID = commandID
 			data.Command.Data = make([]uint8, len(commandData))
@@ -222,7 +221,7 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 			break
 		}
 		// NOTE: zWGetNodeProtocolInfo also does device class, but does not do
-		// 		 command classes
+		//       command classes
 		// Update DeviceClass
 		node.deviceClass.basic = update.Body[0]
 		node.deviceClass.generic = update.Body[1]
@@ -237,7 +236,7 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 		//       those which the Node can control
 		afterMark := false
 		for _, x := range update.Body[3:len(update.Body)] {
-			if !afterMark && x == device.CommandClassMark {
+			if !afterMark && x == CommandClassMark {
 				afterMark = true
 			} else if !afterMark {
 				node.commandClasses = append(node.commandClasses, x)
@@ -270,21 +269,21 @@ func (node *Node) supportsCommandClass(commandClass uint8) bool {
 // getOneShotCallbackChannel returns a channel in which the next application
 // update result will be sent to
 // Assumption: caller holds node lock
-func (node *Node) getOneShotCallbackChannel(commandClassID uint8, commandID uint8) chan *ApplicationCommandData {
+func (node *Node) getOneShotCallbackChannel(commandClassID uint8, commandID uint8) chan *applicationCommandData {
 	// make with 1 to not block
-	channel := make(chan *ApplicationCommandData, 1)
+	channel := make(chan *applicationCommandData, 1)
 	key := commandClassIDsToMapKey(commandClassID, commandID)
 
 	// Make map if it does not exist
 	if node.oneShotCallbacks == nil {
 		node.oneShotCallbacks = make(
-			map[uint16]map[chan *ApplicationCommandData]chan *ApplicationCommandData)
+			map[uint16]map[chan *applicationCommandData]chan *applicationCommandData)
 	}
 
 	// Create channel map if it does not exist
 	if node.oneShotCallbacks[key] == nil {
 		node.oneShotCallbacks[key] = make(
-			map[chan *ApplicationCommandData]chan *ApplicationCommandData)
+			map[chan *applicationCommandData]chan *applicationCommandData)
 	}
 
 	node.oneShotCallbacks[key][channel] = channel
@@ -301,7 +300,7 @@ func (node *Node) zWGetNodeProtocolInfo() (*message.ZWGetNodeProtocolInfo, error
 	if err != nil {
 		return nil, err
 	}
-	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	responsePacket, err := node.network.DoRequest(requestPacket)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +323,7 @@ func (node *Node) zWRequestNodeInfo() error {
 	if err != nil {
 		return err
 	}
-	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	responsePacket, err := node.network.DoRequest(requestPacket)
 	if err != nil {
 		return err
 	}
@@ -347,7 +346,7 @@ func (node *Node) zWSendData(commandClass uint8, payload []uint8) error {
 	if err != nil {
 		return err
 	}
-	responsePacket, err := node.api.BlockingRequest(requestPacket)
+	responsePacket, err := node.network.DoRequest(requestPacket)
 	if err != nil {
 		return err
 	}
@@ -373,7 +372,7 @@ func (node *Node) zwSendDataRequest(commandClass uint8, data []uint8) error {
 	return nil
 }
 
-func (node *Node) zwSendDataWaitForResponse(commandClass uint8, data []uint8, command uint8) (*ApplicationCommandData, error) {
+func (node *Node) zwSendDataWaitForResponse(commandClass uint8, data []uint8, command uint8) (*applicationCommandData, error) {
 	node.mutex.Lock()
 
 	channel := node.getOneShotCallbackChannel(commandClass, command)

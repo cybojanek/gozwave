@@ -19,7 +19,6 @@ limitations under the License.
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/cybojanek/gozwave/device"
 )
 
 const (
@@ -37,7 +36,7 @@ func (node *Node) GetManufacturerSpecific() *ManufacturerSpecific {
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
-	if node.supportsCommandClass(device.CommandClassManufacturerSpecific) {
+	if node.supportsCommandClass(CommandClassManufacturerSpecific) {
 		return &ManufacturerSpecific{node}
 	}
 
@@ -46,10 +45,9 @@ func (node *Node) GetManufacturerSpecific() *ManufacturerSpecific {
 
 // Report of manufacturer and product information
 func (node *ManufacturerSpecific) Report() (manufacturerID uint16, productType uint16, productID uint16, err error) {
-	var response *ApplicationCommandData
+	var response *applicationCommandData
 	response, err = node.zwSendDataWaitForResponse(
-		device.CommandClassManufacturerSpecific,
-		[]uint8{manufacturerSpecificCommandGet},
+		CommandClassManufacturerSpecific, []uint8{manufacturerSpecificCommandGet},
 		manufacturerSpecificCommandReport)
 	if err != nil {
 		return

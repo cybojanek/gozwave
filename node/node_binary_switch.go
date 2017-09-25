@@ -18,7 +18,6 @@ limitations under the License.
 
 import (
 	"fmt"
-	"github.com/cybojanek/gozwave/device"
 )
 
 const (
@@ -39,7 +38,7 @@ func (node *Node) GetBinarySwitch() *BinarySwitch {
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
-	if node.supportsCommandClass(device.CommandClassBinarySwitch) {
+	if node.supportsCommandClass(CommandClassBinarySwitch) {
 		return &BinarySwitch{node}
 	}
 
@@ -48,20 +47,20 @@ func (node *Node) GetBinarySwitch() *BinarySwitch {
 
 // On turns the switch on
 func (node *BinarySwitch) On() error {
-	return node.zwSendDataRequest(device.CommandClassBinarySwitch,
+	return node.zwSendDataRequest(CommandClassBinarySwitch,
 		[]uint8{binarySwitchCommandSet, binarySwitchValueOn})
 }
 
 // Off turns the switch off
 func (node *BinarySwitch) Off() error {
-	return node.zwSendDataRequest(device.CommandClassBinarySwitch,
+	return node.zwSendDataRequest(CommandClassBinarySwitch,
 		[]uint8{binarySwitchCommandSet, binarySwitchValueOff})
 }
 
 // IsOn queries the switch to check current status
 func (node *BinarySwitch) IsOn() (bool, error) {
 	if response, err := node.zwSendDataWaitForResponse(
-		device.CommandClassBinarySwitch, []uint8{binarySwitchCommandGet},
+		CommandClassBinarySwitch, []uint8{binarySwitchCommandGet},
 		binarySwitchCommandReport); err != nil {
 		return false, err
 	} else if len(response.Command.Data) != 1 {

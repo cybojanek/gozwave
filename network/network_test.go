@@ -1,4 +1,4 @@
-package api
+package network
 
 /*
 Copyright (C) 2017 Jan Kasiak
@@ -25,7 +25,7 @@ import (
 const testDevicePath = "/dev/tty.usbmodem1451"
 
 func TestApiOpenClose(t *testing.T) {
-	api := ZWAPI{DevicePath: testDevicePath}
+	api := Network{DevicePath: testDevicePath}
 
 	if testing.Short() {
 		t.Skipf("Skipping API test")
@@ -60,8 +60,8 @@ func TestApiOpenClose(t *testing.T) {
 }
 
 func TestAPI(t *testing.T) {
-	api := ZWAPI{DevicePath: testDevicePath}
-	api.DebugLogging = true
+	api := Network{DevicePath: testDevicePath}
+	api.DebugLogging = false
 
 	if testing.Short() {
 		t.Skipf("Skipping API test")
@@ -94,27 +94,30 @@ func TestAPI(t *testing.T) {
 		}
 	}
 
-	s := api.GetNode(5)
+	s := api.GetNode(14)
 	bs := s.GetBinarySwitch()
+	if bs != nil {
+		if err := bs.On(); err != nil {
+			t.Logf("Failed to turn on node: %v", err)
+		}
+		if isOn, err := bs.IsOn(); err != nil {
+			t.Logf("Failed to check node on: %v", err)
+		} else if !isOn {
+			t.Logf("Expected switch to be on")
+		}
 
-	if err := bs.Off(); err != nil {
-		t.Logf("Failed to turn off node: %v", err)
-	}
-	if isOn, err := bs.IsOn(); err != nil {
-		t.Logf("Failed to check node off: %v", err)
-	} else if isOn {
-		t.Logf("Expected switch to be off")
-	}
+		time.Sleep(time.Second * 1)
 
-	time.Sleep(time.Second * 1)
-
-	if err := bs.On(); err != nil {
-		t.Logf("Failed to turn on node: %v", err)
-	}
-	if isOn, err := bs.IsOn(); err != nil {
-		t.Logf("Failed to check node on: %v", err)
-	} else if !isOn {
-		t.Logf("Expected switch to be on")
+		if err := bs.Off(); err != nil {
+			t.Logf("Failed to turn off node: %v", err)
+		}
+		if isOn, err := bs.IsOn(); err != nil {
+			t.Logf("Failed to check node off: %v", err)
+		} else if isOn {
+			t.Logf("Expected switch to be off")
+		}
+	} else {
+		t.Logf("Node %d is not a switch", s.ID)
 	}
 
 	for _, node := range nodes {

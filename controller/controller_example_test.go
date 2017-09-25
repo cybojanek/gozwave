@@ -24,20 +24,20 @@ import (
 
 func Example() {
 	// Create controller
-	con := controller.Controller{DevicePath: "/dev/tty.usbmodem1451",
+	con := controller.SerialController{DevicePath: "/dev/tty.usbmodem1451",
 		DebugLogging: true}
 
-	// Optionally register a default channel for receiving all asynchronous
+	// Optionally register a callback channel for receiving all asynchronous
 	// messages, i.e. switch reports. This can be done at any time, even after
 	// open. To unregister, call SetCallbackChannel with nil.
-	defaultChannel := make(chan *packet.Packet, 1)
+	callbackChannel := make(chan *packet.Packet, 1)
 	go func() {
 		for {
-			packet := <-defaultChannel
+			packet := <-callbackChannel
 			fmt.Printf("Got packet: %v\n", packet)
 		}
 	}()
-	con.SetCallbackChannel(defaultChannel)
+	con.SetCallbackChannel(callbackChannel)
 
 	// Open controller
 	if err := con.Open(); err != nil {
@@ -50,7 +50,7 @@ func Example() {
 		PacketType: packet.PacketTypeRequest, MessageType: 0x07}
 
 	// Issue and wait for response
-	responsePacket, err := con.BlockingRequest(&requestPacket)
+	responsePacket, err := con.DoRequest(&requestPacket)
 	if err != nil {
 		fmt.Printf("Failed to process request: %v", err)
 	} else {

@@ -1,4 +1,4 @@
-package api_test
+package network_test
 
 /*
 Copyright (C) 2017 Jan Kasiak
@@ -18,29 +18,29 @@ limitations under the License.
 
 import (
 	"fmt"
-	"github.com/cybojanek/gozwave/api"
+	"github.com/cybojanek/gozwave/network"
 )
 
 func Example() {
-	// Create API device
-	zwapi := api.ZWAPI{DevicePath: "/dev/tty.usbmodem1451",
+	// Create network
+	net := network.Network{DevicePath: "/dev/tty.usbmodem1451",
 		DebugLogging: true}
 
-	// Open API device
-	if err := zwapi.Open(); err != nil {
+	// Open
+	if err := net.Open(); err != nil {
 		fmt.Printf("Failed to Open: %v", err)
 		return
 	}
 
 	// Initialize - gets controller information, list of nodes on network
-	if err := zwapi.Initialize(); err != nil {
+	if err := net.Initialize(); err != nil {
 		fmt.Printf("Failed to Initialize: %v", err)
 		return
 	}
 
-	// Iterate over nodes and refresh them getting more specific information
-	// about their supported operations
-	for _, node := range zwapi.GetNodes() {
+	// Iterate over nodes and refresh them, querying for more specific
+	// information about their supported operations
+	for _, node := range net.GetNodes() {
 		if err := node.Refresh(); err != nil {
 			fmt.Printf("Node: %d failed to refresh: %v\n", node.ID, err)
 		} else {
@@ -49,7 +49,7 @@ func Example() {
 	}
 
 	// Get specific node
-	if node := zwapi.GetNode(5); node != nil {
+	if node := net.GetNode(5); node != nil {
 		fmt.Printf("Node: %d exists!\n", node.ID)
 
 		// Do node work ... from many go routines
@@ -67,7 +67,7 @@ func Example() {
 	// Do more work ... from many go routines
 
 	// Close API
-	if err := zwapi.Close(); err != nil {
+	if err := net.Close(); err != nil {
 		fmt.Printf("Failed to Close: %v", err)
 		return
 	}

@@ -1,5 +1,4 @@
-// Package device handles device enumeratio
-package device
+package node
 
 /*
 Copyright (C) 2017 Jan Kasiak

@@ -26,7 +26,7 @@ import (
 const testDevicePath = "/dev/tty.usbmodem1451"
 
 func TestControllerOpenClose(t *testing.T) {
-	controller := Controller{DevicePath: testDevicePath}
+	controller := SerialController{DevicePath: testDevicePath}
 
 	if testing.Short() {
 		t.Skipf("Skipping controller test")
@@ -61,11 +61,11 @@ func TestControllerOpenClose(t *testing.T) {
 }
 
 func TestControllerClosedRequest(t *testing.T) {
-	controller := Controller{DevicePath: testDevicePath}
+	controller := SerialController{DevicePath: testDevicePath}
 
 	// Check request before open
 	requestPacket := message.SerialAPIGetInitDataRequest()
-	response, err := controller.BlockingRequest(requestPacket)
+	response, err := controller.DoRequest(requestPacket)
 	if err == nil {
 		t.Errorf("Expected non nil error: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestControllerClosedRequest(t *testing.T) {
 		t.Errorf("Expected nil error: %v", err)
 	}
 
-	response, err = controller.BlockingRequest(requestPacket)
+	response, err = controller.DoRequest(requestPacket)
 	if err == nil {
 		t.Errorf("Expected non nil error: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestControllerClosedRequest(t *testing.T) {
 }
 
 func TestController(t *testing.T) {
-	controller := Controller{DevicePath: testDevicePath}
+	controller := SerialController{DevicePath: testDevicePath}
 
 	if testing.Short() {
 		t.Skipf("Skipping controller test")
@@ -112,7 +112,7 @@ func TestController(t *testing.T) {
 
 	requestPacket := message.SerialAPIGetInitDataRequest()
 	for i := 0; i < 5; i++ {
-		response, err := controller.BlockingRequest(requestPacket)
+		response, err := controller.DoRequest(requestPacket)
 		if err != nil {
 			t.Errorf("Expected nil error: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestController(t *testing.T) {
 }
 
 func TestControllerCallback(t *testing.T) {
-	controller := Controller{DevicePath: testDevicePath}
+	controller := SerialController{DevicePath: testDevicePath}
 
 	if testing.Short() {
 		t.Skipf("Skipping controller test")

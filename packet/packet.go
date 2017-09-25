@@ -88,7 +88,7 @@ func (packet *Packet) String() string {
 		strings.Join(stringBytes, " "), packet.Checksum)
 }
 
-// Bytes runs Update() and returns the binary serialization of the packet.
+// Bytes runs Update() and returns the binary encoding of the packet.
 func (packet *Packet) Bytes() ([]byte, error) {
 	if err := packet.Update(); err != nil {
 		return nil, err
@@ -152,6 +152,12 @@ func (packet *Packet) Update() error {
 	}
 
 	return nil
+}
+
+// Reset Parser to initial state
+func (parser *Parser) Reset() {
+	parser.state = packetParseStatePreamble
+	parser.packet = nil
 }
 
 // Parse a byte. If finished parsing a Packet, then Packet return is non nil.
