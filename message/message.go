@@ -18,7 +18,9 @@ limitations under the License.
 */
 
 import (
+	"encoding/binary"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -183,4 +185,48 @@ func EncodeDuration(duration time.Duration) (uint8, error) {
 		return 0, fmt.Errorf("Duration must be in range [0, 127] seconds or [1, 127] minutes")
 	}
 	return durationByte, nil
+}
+
+// DecodeFloat decodes a float value
+func DecodeFloat(bytes []uint8, precision uint8) (float32, error) {
+	// Extract decimal value to number
+	value := int32(0)
+
+	switch len(bytes) {
+	case 1:
+		value = int32(bytes[0])
+	case 2:
+		value = int32(int16(binary.BigEndian.Uint16(bytes)))
+	case 4:
+		value = int32(binary.BigEndian.Uint32(bytes))
+	default:
+		return 0, fmt.Errorf("Bad size %d not in (1, 2, 4)", len(bytes))
+	}
+
+	sign := int32(1)
+	if value < 0 {
+		sign = -1
+		value = -value
+	}
+
+	// Split by precision
+	strDecimal := ""
+
+	for i := uint8(0); i < precision; i++ {
+		strDecimal = fmt.Sprintf("%d", value%10) + strDecimal
+		value = value / 10
+	}
+	if len(strDecimal) == 0 {
+		strDecimal = "0"
+	}
+	strDecimal = fmt.Sprintf("%d.%s", sign*value, strDecimal)
+
+	var f float64
+	var err error
+	f, err = strconv.ParseFloat(strDecimal, 32)
+	if err != nil {
+		return 0, err
+	}
+
+	return float32(f), nil
 }
