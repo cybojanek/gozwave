@@ -52,13 +52,13 @@ func GetVersionResponse(p *packet.Packet) (*GetVersion, error) {
 		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
-	if len(p.Body) != 13 {
-		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
+	if len(p.Body) < 2 {
+		return nil, fmt.Errorf("Bad Body length: %d < 2", len(p.Body))
 	}
 
 	version := GetVersion{}
-	version.Info = string(p.Body[0:11])
-	version.LibraryType = p.Body[12]
+	version.Info = string(p.Body[0 : len(p.Body)-1])
+	version.LibraryType = p.Body[len(p.Body)-1]
 
 	return &version, nil
 }
@@ -70,7 +70,7 @@ func MemoryGetIDResponse(p *packet.Packet) (*MemoryGetID, error) {
 	}
 
 	if len(p.Body) != 5 {
-		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
+		return nil, fmt.Errorf("Bad Body length: %d != 5", len(p.Body))
 	}
 
 	id := MemoryGetID{}
@@ -88,7 +88,7 @@ func SerialAPIGetCapabilitiesResponse(p *packet.Packet) (*SerialAPIGetCapabiliti
 	}
 
 	if len(p.Body) != 40 {
-		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
+		return nil, fmt.Errorf("Bad Body length: %d != 40", len(p.Body))
 	}
 
 	message := SerialAPIGetCapabilities{}
@@ -102,6 +102,7 @@ func SerialAPIGetCapabilitiesResponse(p *packet.Packet) (*SerialAPIGetCapabiliti
 		for b := uint8(0); b < 8; b++ {
 			if (x & (1 << b)) != 0 {
 				if i == 31 && b == 7 {
+					// Catch unexpected corner case
 					return nil, errors.New("Unexpected supported MessageType 256")
 				}
 				message.MessageTypes = append(message.MessageTypes,
@@ -120,7 +121,7 @@ func SerialAPIGetInitDataResponse(p *packet.Packet) (*SerialAPIGetInitData, erro
 	}
 
 	if len(p.Body) != 34 {
-		return nil, fmt.Errorf("Bad Body length: %d", len(p.Body))
+		return nil, fmt.Errorf("Bad Body length: %d != 34", len(p.Body))
 	}
 
 	message := SerialAPIGetInitData{}

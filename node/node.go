@@ -215,7 +215,7 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 
 	switch update.Status {
 	case message.ZWApplicationUpdateStateReceived:
-		if len(update.Body) < 4 {
+		if len(update.Body) < 3 {
 			log.Printf("ERROR body message.ZWApplicationUpdateStateReceived too short: %d",
 				len(update.Body))
 			break
@@ -235,7 +235,7 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 		//       the Node, while the CommandClasses after CommandClassMark are
 		//       those which the Node can control
 		afterMark := false
-		for _, x := range update.Body[3:len(update.Body)] {
+		for _, x := range update.Body[3:] {
 			if !afterMark && x == CommandClassMark {
 				afterMark = true
 			} else if !afterMark {
