@@ -58,6 +58,7 @@ const (
 const (
 	CommandClassNoOperation                 uint8 = 0x01
 	CommandClassBinarySwitch                      = 0x25
+	CommandClassMultiLevelSwitch                  = 0x26
 	CommandClassAllSwitch                         = 0x27
 	CommandClassMeter                             = 0x32
 	CommandClassColorSwitch                       = 0x33

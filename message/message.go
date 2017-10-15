@@ -17,6 +17,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+import (
+	"fmt"
+	"time"
+)
+
 // Message Type
 const (
 	MessageTypeNone                        uint8 = 0x00
@@ -163,4 +168,19 @@ type ZWSendData struct {
 // IsValidNodeID checks if the nodeID is in the valid range of nodes
 func IsValidNodeID(nodeID uint8) bool {
 	return nodeID > 0 && nodeID < 233
+}
+
+// EncodeDuration encodes a duration to a duration byte
+// Input must be within [0, 127] seconds or [1, 127] minutes
+func EncodeDuration(duration time.Duration) (uint8, error) {
+	durationByte := uint8(0)
+	seconds := uint64(duration.Seconds())
+	if seconds >= 0 && seconds <= 0x7f {
+		durationByte = uint8(seconds)
+	} else if seconds > 60 && seconds < (60*127) && seconds%60 == 0 {
+		durationByte = 0x80 + uint8((seconds/60)-1)
+	} else {
+		return 0, fmt.Errorf("Duration must be in range [0, 127] seconds or [1, 127] minutes")
+	}
+	return durationByte, nil
 }

@@ -24,8 +24,6 @@ const (
 	binarySwitchCommandSet    uint8 = 0x01
 	binarySwitchCommandGet          = 0x02
 	binarySwitchCommandReport       = 0x03
-	binarySwitchValueOff            = 0x00
-	binarySwitchValueOn             = 0xff
 )
 
 // BinarySwitch information
@@ -48,13 +46,13 @@ func (node *Node) GetBinarySwitch() *BinarySwitch {
 // On turns the switch on
 func (node *BinarySwitch) On() error {
 	return node.zwSendDataRequest(CommandClassBinarySwitch,
-		[]uint8{binarySwitchCommandSet, binarySwitchValueOn})
+		[]uint8{binarySwitchCommandSet, 0xff})
 }
 
 // Off turns the switch off
 func (node *BinarySwitch) Off() error {
 	return node.zwSendDataRequest(CommandClassBinarySwitch,
-		[]uint8{binarySwitchCommandSet, binarySwitchValueOff})
+		[]uint8{binarySwitchCommandSet, 0x00})
 }
 
 // IsOn queries the switch to check current status
