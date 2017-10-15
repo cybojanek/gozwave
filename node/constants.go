@@ -61,6 +61,7 @@ const (
 	CommandClassMultiLevelSwitch                  = 0x26
 	CommandClassAllSwitch                         = 0x27
 	CommandClassBinarySensor                      = 0x30
+	CommandClassMultiLevelSensor                  = 0x31
 	CommandClassMeter                             = 0x32
 	CommandClassColorSwitch                       = 0x33
 	CommandClassAssociationGroupInformation       = 0x59
