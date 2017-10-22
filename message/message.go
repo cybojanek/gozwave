@@ -172,6 +172,14 @@ func IsValidNodeID(nodeID uint8) bool {
 	return nodeID > 0 && nodeID < 233
 }
 
+// DecodeDuration duration byte into a time.Duration
+func DecodeDuration(durationByte uint8) time.Duration {
+	if durationByte >= 0 && durationByte <= 0x7f {
+		return time.Second * time.Duration(durationByte)
+	}
+	return time.Minute * time.Duration(durationByte-0x80+1)
+}
+
 // EncodeDuration encodes a duration to a duration byte
 // Input must be within [0, 127] seconds or [1, 127] minutes
 func EncodeDuration(duration time.Duration) (uint8, error) {
@@ -179,7 +187,7 @@ func EncodeDuration(duration time.Duration) (uint8, error) {
 	seconds := uint64(duration.Seconds())
 	if seconds >= 0 && seconds <= 0x7f {
 		durationByte = uint8(seconds)
-	} else if seconds > 60 && seconds < (60*127) && seconds%60 == 0 {
+	} else if seconds > 60 && seconds <= (60*127) && seconds%60 == 0 {
 		durationByte = 0x80 + uint8((seconds/60)-1)
 	} else {
 		return 0, fmt.Errorf("Duration must be in range [0, 127] seconds or [1, 127] minutes")
@@ -194,7 +202,7 @@ func DecodeFloat(bytes []uint8, precision uint8) (float32, error) {
 
 	switch len(bytes) {
 	case 1:
-		value = int32(bytes[0])
+		value = int32(int8(bytes[0]))
 	case 2:
 		value = int32(int16(binary.BigEndian.Uint16(bytes)))
 	case 4:
@@ -203,15 +211,17 @@ func DecodeFloat(bytes []uint8, precision uint8) (float32, error) {
 		return 0, fmt.Errorf("Bad size %d not in (1, 2, 4)", len(bytes))
 	}
 
-	sign := int32(1)
+	// Keep track of sign
+	signChar := ""
 	if value < 0 {
-		sign = -1
+		signChar = "-"
 		value = -value
 	}
 
 	// Split by precision
 	strDecimal := ""
 
+	// Extract decimal places
 	for i := uint8(0); i < precision; i++ {
 		strDecimal = fmt.Sprintf("%d", value%10) + strDecimal
 		value = value / 10
@@ -219,8 +229,10 @@ func DecodeFloat(bytes []uint8, precision uint8) (float32, error) {
 	if len(strDecimal) == 0 {
 		strDecimal = "0"
 	}
-	strDecimal = fmt.Sprintf("%d.%s", sign*value, strDecimal)
+	// Prepend sign and whole
+	strDecimal = fmt.Sprintf("%s%d.%s", signChar, value, strDecimal)
 
+	// Parse to float
 	var f float64
 	var err error
 	f, err = strconv.ParseFloat(strDecimal, 32)
