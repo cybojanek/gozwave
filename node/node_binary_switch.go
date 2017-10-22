@@ -43,6 +43,8 @@ func (node *Node) GetBinarySwitch() *BinarySwitch {
 	return nil
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // On turns the switch on
 func (node *BinarySwitch) On() error {
 	return node.zwSendDataRequest(CommandClassBinarySwitch,
@@ -57,13 +59,39 @@ func (node *BinarySwitch) Off() error {
 
 // IsOn queries the switch to check current status
 func (node *BinarySwitch) IsOn() (bool, error) {
-	if response, err := node.zwSendDataWaitForResponse(
+	var response *ApplicationCommandData
+	var err error
+
+	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassBinarySwitch, []uint8{binarySwitchCommandGet},
-		binarySwitchCommandReport); err != nil {
+		binarySwitchCommandReport, nil); err != nil {
 		return false, err
-	} else if len(response.Command.Data) != 1 {
-		return false, fmt.Errorf("Bad response")
-	} else {
-		return response.Command.Data[0] != 0, nil
 	}
+
+	return node.ParseReport(response)
+}
+
+// IsReport checks if the report is a ParseReport
+func (node *BinarySwitch) IsReport(report *ApplicationCommandData) bool {
+	return report.Command.ID == binarySwitchCommandReport
+}
+
+// ParseReport of status
+func (node *BinarySwitch) ParseReport(report *ApplicationCommandData) (bool, error) {
+	if report.Command.ClassID != CommandClassBinarySwitch {
+		return false, fmt.Errorf("Bad Report Command Class ID: 0x%02x != 0x%02x",
+			report.Command.ClassID, CommandClassBinarySwitch)
+	}
+
+	if report.Command.ID != binarySwitchCommandReport {
+		return false, fmt.Errorf("Bad Report Command ID 0x%02x != 0x%02x",
+			report.Command.ID, binarySwitchCommandReport)
+	}
+
+	data := report.Command.Data
+	if len(data) != 1 {
+		return false, fmt.Errorf("Bad Report Data length %d != 1", len(data))
+	}
+
+	return data[0] != 0, nil
 }

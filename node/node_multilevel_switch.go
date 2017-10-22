@@ -63,15 +63,41 @@ func (node *MultiLevelSwitch) Off() error {
 
 // IsOn queries the switch to check current status
 func (node *MultiLevelSwitch) IsOn() (bool, error) {
-	if response, err := node.zwSendDataWaitForResponse(
+	var response *ApplicationCommandData
+	var err error
+
+	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSwitch, []uint8{multiLevelSwitchCommandGet},
-		multiLevelSwitchCommandReport); err != nil {
+		multiLevelSwitchCommandReport, nil); err != nil {
 		return false, err
-	} else if len(response.Command.Data) != 1 {
-		return false, fmt.Errorf("Bad response")
-	} else {
-		return response.Command.Data[0] != 0, nil
 	}
+
+	return node.ParseReport(response)
+}
+
+// IsReport checks if the report is a ParseReport
+func (node *MultiLevelSwitch) IsReport(report *ApplicationCommandData) bool {
+	return report.Command.ID == multiLevelSwitchCommandReport
+}
+
+// ParseReport of status
+func (node *MultiLevelSwitch) ParseReport(report *ApplicationCommandData) (bool, error) {
+	if report.Command.ClassID != CommandClassMultiLevelSwitch {
+		return false, fmt.Errorf("Bad Report Command Class ID: 0x%02x != 0x%02x",
+			report.Command.ClassID, CommandClassMultiLevelSwitch)
+	}
+
+	if report.Command.ID != multiLevelSwitchCommandReport {
+		return false, fmt.Errorf("Bad Report Command ID 0x%02x != 0x%02x",
+			report.Command.ID, multiLevelSwitchCommandReport)
+	}
+
+	data := report.Command.Data
+	if len(data) != 1 {
+		return false, fmt.Errorf("Bad Report Data length %d != 1", len(data))
+	}
+
+	return data[0] != 0, nil
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -80,10 +106,10 @@ func (node *MultiLevelSwitch) IsOn() (bool, error) {
 func (node *MultiLevelSwitch) Get() (uint8, error) {
 	if response, err := node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSwitch, []uint8{multiLevelSwitchCommandGet},
-		multiLevelSwitchCommandReport); err != nil {
+		multiLevelSwitchCommandReport, nil); err != nil {
 		return 0, err
 	} else if len(response.Command.Data) != 1 {
-		return 0, fmt.Errorf("Bad response")
+		return 0, fmt.Errorf("Bad response length %d != 1", len(response.Command.Data))
 	} else {
 		return response.Command.Data[0], nil
 	}

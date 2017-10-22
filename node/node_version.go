@@ -16,11 +16,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// FIXME: The current callback mechanism structure means that if we get
-// 		  different command class version values for the same node at the same
-// 		  time, some of those requests might fail, because the first callback to
-// 		  reach us might be for a different command class
-
 import (
 	"encoding/binary"
 	"fmt"
@@ -50,30 +45,32 @@ func (node *Node) GetVersion() *Version {
 	return nil
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Get the node version information. Return value is for library, protocol,
 // application
-func (node *Version) Get() (uint8, uint16, uint16, error) {
-	// Issue request
-	var response *applicationCommandData
-	var err error
+func (node *Version) Get() (library uint8, protocol uint16, application uint16, err error) {
+	var response *ApplicationCommandData
+
 	if response, err = node.zwSendDataWaitForResponse(
-		CommandClassVersion, []uint8{versionGet}, versionReport); err != nil {
-		return 0, 0, 0, err
+		CommandClassVersion, []uint8{versionGet}, versionReport, nil); err != nil {
+		return
 	}
 
-	// Check size
 	data := response.Command.Data
 	if len(data) != 5 {
-		return 0, 0, 0, fmt.Errorf("Unexpected data length: %d != %d", len(data), 5)
+		err = fmt.Errorf("Unexpected data length: %d != %d", len(data), 5)
+		return
 	}
 
-	// Extract data
-	library := data[0]
-	protocol := binary.BigEndian.Uint16(data[1:3])
-	application := binary.BigEndian.Uint16(data[3:5])
+	library = data[0]
+	protocol = binary.BigEndian.Uint16(data[1:3])
+	application = binary.BigEndian.Uint16(data[3:5])
 
-	return library, protocol, application, nil
+	return
 }
+
+////////////////////////////////////////////////////////////////////////////////
 
 // GetCommandClass version for a given command class
 func (node *Version) GetCommandClass(commandClass uint8) (uint8, error) {
@@ -82,25 +79,22 @@ func (node *Version) GetCommandClass(commandClass uint8) (uint8, error) {
 		return 0, fmt.Errorf("Node does not support command class")
 	}
 
-	// Issue request
-	var response *applicationCommandData
+	filter := func(response *ApplicationCommandData) bool {
+		return len(response.Command.Data) > 0 && response.Command.Data[0] == commandClass
+	}
+
+	var response *ApplicationCommandData
 	var err error
+
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassVersion, []uint8{versionCommandClassGet, commandClass},
-		versionCommandClassReport); err != nil {
+		versionCommandClassReport, filter); err != nil {
 		return 0, err
 	}
 
-	// Check size
 	data := response.Command.Data
 	if len(data) != 2 {
-		return 0, fmt.Errorf("Unexpected data length: %d != %d", len(data), 2)
-	}
-
-	// Check command class
-	if data[0] != commandClass {
-		return 0, fmt.Errorf("Unexpected command class 0x%02x != 0x%02x",
-			data[0], commandClass)
+		return 0, fmt.Errorf("Unexpected data length: %d != 2", len(data))
 	}
 
 	return data[1], nil

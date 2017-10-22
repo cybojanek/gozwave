@@ -27,10 +27,10 @@ const (
 
 // Binary Sensor Type
 const (
-	BinarySensorTypeGeneralPurpose uint8 = 0x01
+	BinarySensorTypeGeneral        uint8 = 0x01
 	BinarySensorTypeSmoke                = 0x02
-	BinarySensorTypeCO                   = 0x03
-	BinarySensorTypeCO2                  = 0x04
+	BinarySensorTypeCarbonMonoxide       = 0x03
+	BinarySensorTypeCarbonDioxide        = 0x04
 	BinarySensorTypeHeat                 = 0x05
 	BinarySensorTypeWater                = 0x06
 	BinarySensorTypeFreeze               = 0x07
@@ -60,28 +60,73 @@ func (node *Node) GetBinarySensor() *BinarySensor {
 	return nil
 }
 
-// IsIdle queries the sensor
-func (node *BinarySensor) IsIdle() (bool, error) {
-	if response, err := node.zwSendDataWaitForResponse(
+////////////////////////////////////////////////////////////////////////////////
+
+// IsActive queries the sensor
+func (node *BinarySensor) IsActive() (bool, error) {
+	var response *ApplicationCommandData
+	var err error
+
+	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassBinarySensor, []uint8{binarySensorCommandGet},
-		binarySensorCommandReport); err != nil {
+		binarySensorCommandReport, nil); err != nil {
 		return false, err
-	} else if len(response.Command.Data) != 1 {
-		return false, fmt.Errorf("Bad response")
-	} else {
-		return response.Command.Data[0] == 0, nil
 	}
+
+	isActive, _, err := node.ParseReport(response)
+	return isActive, err
 }
 
-// IsIdleV2 queries the sensor for the given type
-func (node *BinarySensor) IsIdleV2(sensorType uint8) (bool, error) {
-	if response, err := node.zwSendDataWaitForResponse(
-		CommandClassBinarySensor, []uint8{binarySensorCommandGet, sensorType},
-		binarySensorCommandReport); err != nil {
-		return false, err
-	} else if len(response.Command.Data) != 2 || response.Command.Data[1] != sensorType {
-		return false, fmt.Errorf("Bad response")
-	} else {
-		return response.Command.Data[0] == 0, nil
+// IsReport checks if the report is a ParseReport
+func (node *BinarySensor) IsReport(report *ApplicationCommandData) bool {
+	return report.Command.ID == binarySensorCommandReport
+}
+
+// ParseReport of status
+func (node *BinarySensor) ParseReport(report *ApplicationCommandData) (isActive bool, sensorType uint8, err error) {
+	if report.Command.ClassID != CommandClassBinarySensor {
+		err = fmt.Errorf("Bad Report Command Class ID: 0x%02x != 0x%02x",
+			report.Command.ClassID, CommandClassBinarySensor)
+		return
 	}
+
+	if report.Command.ID != binarySensorCommandReport {
+		err = fmt.Errorf("Bad Report Command ID 0x%02x != 0x%02x",
+			report.Command.ID, binarySensorCommandReport)
+		return
+	}
+
+	data := report.Command.Data
+	if len(data) != 1 && len(data) != 2 {
+		err = fmt.Errorf("Bad Report Data length %d != 1 and %d != 2", len(data), len(data))
+		return
+	}
+
+	isActive = data[0] == 0xff
+	sensorType = BinarySensorTypeGeneral
+	if len(data) > 1 {
+		sensorType = data[1]
+	}
+	return
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// IsActiveV2 queries the sensor for the given type
+func (node *BinarySensor) IsActiveV2(sensorType uint8) (bool, error) {
+	var response *ApplicationCommandData
+	var err error
+
+	filter := func(response *ApplicationCommandData) bool {
+		return len(response.Command.Data) > 1 && response.Command.Data[1] == sensorType
+	}
+
+	if response, err = node.zwSendDataWaitForResponse(
+		CommandClassBinarySensor, []uint8{binarySensorCommandGet, sensorType},
+		binarySensorCommandReport, filter); err != nil {
+		return false, err
+	}
+
+	isActive, _, err := node.ParseReport(response)
+	return isActive, err
 }

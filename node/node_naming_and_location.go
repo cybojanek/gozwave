@@ -36,7 +36,8 @@ const (
 )
 
 const (
-	maxNameLength uint8 = 16
+	maxNameLength     uint8 = 16
+	maxLocationLength       = 16
 )
 
 // NamingAndLocation information
@@ -84,11 +85,12 @@ func extractString(bytes []uint8) (string, error) {
 
 // GetName of the node
 func (node *NamingAndLocation) GetName() (string, error) {
-	// Issue request
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
+
 	if response, err = node.zwSendDataWaitForResponse(
-		CommandClassNodeNamingAndLocation, []uint8{namingGet}, namingReport); err != nil {
+		CommandClassNodeNamingAndLocation, []uint8{namingGet}, namingReport,
+		nil); err != nil {
 		return "", err
 	}
 
@@ -100,7 +102,7 @@ func (node *NamingAndLocation) SetName(name string) error {
 	stringBytes := []byte(name)
 
 	if len(stringBytes) > int(maxNameLength) {
-		return fmt.Errorf("Name is too long: max is 16 bytes")
+		return fmt.Errorf("Name is too long: max is %d bytes", maxNameLength)
 	}
 
 	data := make([]byte, 2+len(stringBytes))
@@ -115,11 +117,12 @@ func (node *NamingAndLocation) SetName(name string) error {
 
 // GetLocation of the node
 func (node *NamingAndLocation) GetLocation() (string, error) {
-	// Issue request
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
+
 	if response, err = node.zwSendDataWaitForResponse(
-		CommandClassNodeNamingAndLocation, []uint8{locationGet}, locationReport); err != nil {
+		CommandClassNodeNamingAndLocation, []uint8{locationGet}, locationReport,
+		nil); err != nil {
 		return "", err
 	}
 
@@ -130,8 +133,8 @@ func (node *NamingAndLocation) GetLocation() (string, error) {
 func (node *NamingAndLocation) SetLocation(location string) error {
 	stringBytes := []byte(location)
 
-	if len(stringBytes) > int(maxNameLength) {
-		return fmt.Errorf("Location is too long: max is 16 bytes")
+	if len(stringBytes) > int(maxLocationLength) {
+		return fmt.Errorf("Location is too long: max is %d bytes", maxLocationLength)
 	}
 
 	data := make([]byte, 2+len(stringBytes))

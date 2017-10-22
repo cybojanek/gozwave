@@ -19,7 +19,6 @@ limitations under the License.
 import (
 	"fmt"
 	"github.com/cybojanek/gozwave/message"
-	"time"
 )
 
 const (
@@ -157,21 +156,45 @@ func (node *Node) GetMultiLevelSensor() *MultiLevelSensor {
 	return nil
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Get queries the sensor, expects a V1-4 reply
 func (node *MultiLevelSensor) Get() (*MultiLevelSensorResult, error) {
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
-	var result MultiLevelSensorResult
 
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSensor, []uint8{multiLevelSensorCommandGet},
-		multiLevelSensorCommandReport); err != nil {
+		multiLevelSensorCommandReport, nil); err != nil {
 		return nil, err
 	}
 
-	data := response.Command.Data
+	return node.ParseReport(response)
+}
+
+// IsReport checks if the report is a ParseReport
+func (node *MultiLevelSensor) IsReport(report *ApplicationCommandData) bool {
+	return report.Command.ID == multiLevelSensorCommandReport
+}
+
+// ParseReport of status
+func (node *MultiLevelSensor) ParseReport(report *ApplicationCommandData) (*MultiLevelSensorResult, error) {
+	var result MultiLevelSensorResult
+	var err error
+
+	if report.Command.ClassID != CommandClassMultiLevelSensor {
+		return nil, fmt.Errorf("Bad Report Command Class ID: 0x%02x != 0x%02x",
+			report.Command.ClassID, CommandClassMultiLevelSensor)
+	}
+
+	if report.Command.ID != multiLevelSensorCommandReport {
+		return nil, fmt.Errorf("Bad Report Command ID 0x%02x != 0x%02x",
+			report.Command.ID, multiLevelSensorCommandReport)
+	}
+
+	data := report.Command.Data
 	if len(data) < 3 {
-		return nil, fmt.Errorf("Result is too small %d < %d", len(data), 3)
+		return nil, fmt.Errorf("Bad Report Data length %d < 1", len(data))
 	}
 
 	// Sensor Type
@@ -203,20 +226,19 @@ func (node *MultiLevelSensor) Get() (*MultiLevelSensorResult, error) {
 
 // GetSupportedSensorTypes queries the sensor to get the list of supported sensor types
 func (node *MultiLevelSensor) GetSupportedSensorTypes() ([]uint8, error) {
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
 
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSensor, []uint8{multiLevelSensorCommandGetSensorTypes},
-		multiLevelSensorCommandReportSensorTypes); err != nil {
+		multiLevelSensorCommandReportSensorTypes, nil); err != nil {
 		return nil, err
 	}
-	data := response.Command.Data
 
 	// Loop over bit mask
 	var sensors []uint8
 	sensorType := uint8(1)
-	for _, b := range data {
+	for _, b := range response.Command.Data {
 		for i := uint32(0); i < 8; i++ {
 			if (b & (1 << i)) != 0 {
 				sensors = append(sensors, sensorType)
@@ -231,22 +253,22 @@ func (node *MultiLevelSensor) GetSupportedSensorTypes() ([]uint8, error) {
 // GetSupportedScaleTypes queries the sensor to get the list of supported sensor
 // scale types for the given sensor type
 func (node *MultiLevelSensor) GetSupportedScaleTypes(sensorType uint8) ([]uint8, error) {
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
+
+	filter := func(response *ApplicationCommandData) bool {
+		return len(response.Command.Data) > 0 && response.Command.Data[0] == sensorType
+	}
 
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSensor, []uint8{multiLevelSensorCommandGetScaleTypes},
-		multiLevelSensorCommandReportScaleTypes); err != nil {
+		multiLevelSensorCommandReportScaleTypes, filter); err != nil {
 		return nil, err
 	}
-	data := response.Command.Data
 
+	data := response.Command.Data
 	if len(data) != 2 {
 		return nil, fmt.Errorf("Response size mismatch %d != 2", len(data))
-	}
-
-	if data[0] != sensorType {
-		return nil, fmt.Errorf("Bad sensorType 0x%02x != 0x%02x", data[0], sensorType)
 	}
 
 	var scaleIndices []uint8
@@ -259,50 +281,22 @@ func (node *MultiLevelSensor) GetSupportedScaleTypes(sensorType uint8) ([]uint8,
 	return scaleIndices, nil
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // GetV5 queries the sensor, expects a V5-V11 response
 func (node *MultiLevelSensor) GetV5(sensorType uint8) (*MultiLevelSensorResult, error) {
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
-	var result MultiLevelSensorResult
+
+	filter := func(response *ApplicationCommandData) bool {
+		return len(response.Command.Data) > 0 && response.Command.Data[0] == sensorType
+	}
 
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMultiLevelSensor, []uint8{multiLevelSensorCommandGet, sensorType},
-		multiLevelSensorCommandReport); err != nil {
+		multiLevelSensorCommandReport, filter); err != nil {
 		return nil, err
 	}
 
-	data := response.Command.Data
-	if len(data) < 3 {
-		return nil, fmt.Errorf("Result is too small %d < %d", len(data), 3)
-	}
-
-	// Sensor Type
-	if data[0] != sensorType {
-		return nil, fmt.Errorf("Unexpected sensor type 0x%02x != 0x%02x",
-			data[0], sensorType)
-	}
-	result.SensorType = sensorType
-
-	// Precision, Scale, Size
-	precision := (data[1] >> 5) & 0x7
-	scale := (data[1] >> 3) & 0x3
-	size := data[1] & 0x7
-
-	result.SensorScale = scale
-
-	// Offset into array
-	offset := 2
-
-	// Decode Value
-	var value float32
-	if value, err = message.DecodeFloat(data[offset:offset+int(size)], precision); err != nil {
-		return nil, err
-	}
-	result.Value = float32(value)
-	offset += int(size)
-
-	// Add a short sleep to rate limit access, because sensor seems to lock up...
-	time.Sleep(time.Millisecond * 100)
-
-	return &result, nil
+	return node.ParseReport(response)
 }

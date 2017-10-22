@@ -41,33 +41,32 @@ const responseTimeout = (10 * time.Second)
 type Node struct {
 	ID uint8
 
-	commandClasses        []uint8 // List of supported command classes
-	controlCommandClasses []uint8 // List of control command classes
-	listening             bool    // Is node actively listening
-	deviceClass           struct {
-		basic    uint8 // Basic Device Class
-		generic  uint8 // Generic Device Class
-		specific uint8 // Specific Device Class
+	CommandClasses        []uint8 // List of supported command classes
+	ControlCommandClasses []uint8 // List of control command classes
+	Listening             bool    // Is node actively listening
+	DeviceClass           struct {
+		Basic    uint8 // Basic Device Class
+		Generic  uint8 // Generic Device Class
+		Specific uint8 // Specific Device Class
 	}
-	manufacturer struct {
-		id uint16 // Manufacturer ID
+	Manufacturer struct {
+		ID uint16 // Manufacturer ID
 	}
-	product struct {
-		id  uint16 // Product ID
-		typ uint16 // Product Type
+	Product struct {
+		ID   uint16 // Product ID
+		Type uint16 // Product Type
 	}
 
 	network controller.Controller // Reference to parent network
 	mutex   sync.RWMutex          // Node mutex
 
-	requestNodeInfoComplete chan int // Temporary channel used during refresh
-
-	oneShotCallbacks map[uint16]map[chan *applicationCommandData]chan *applicationCommandData // One shot ZWSenData callbacks
-	longCallbacks    map[uint16]map[chan *applicationCommandData]chan *applicationCommandData // Long ZWSendData callbacks
+	keyCallbacks                map[uint16]map[chan *ApplicationCommandData]chan *ApplicationCommandData
+	applicationCommandCallbacks map[chan *ApplicationCommandData]chan *ApplicationCommandData
+	applicationUpdateCallbacks  map[chan *ApplicationUpdateData]chan *ApplicationUpdateData
 }
 
-// applicationCommandData information
-type applicationCommandData struct {
+// ApplicationCommandData information
+type ApplicationCommandData struct {
 	Status  uint8 // ??
 	NodeID  uint8 // Source NodeID
 	Command struct {
@@ -76,6 +75,15 @@ type applicationCommandData struct {
 		Data    []uint8 // Command data
 	}
 }
+
+// ApplicationUpdateData information
+type ApplicationUpdateData struct {
+	Status uint8   // One of message.ZWApplicationUpdateState
+	NodeID uint8   // Source NodeID
+	Data   []uint8 // Update data
+}
+
+type applicationCallbackFilter func(response *ApplicationCommandData) bool
 
 // MakeNode makes a new node
 func MakeNode(nodeID uint8, controller controller.Controller) *Node {
@@ -100,51 +108,109 @@ func (node *Node) Refresh() error {
 	}
 
 	// Update fields
-	node.listening = nodeProtocolInfo.Capabilities.Listening
-	node.deviceClass.basic = nodeProtocolInfo.DeviceClass.Basic
-	node.deviceClass.generic = nodeProtocolInfo.DeviceClass.Generic
-	node.deviceClass.specific = nodeProtocolInfo.DeviceClass.Specific
+	node.Listening = nodeProtocolInfo.Capabilities.Listening
+	node.DeviceClass.Basic = nodeProtocolInfo.DeviceClass.Basic
+	node.DeviceClass.Generic = nodeProtocolInfo.DeviceClass.Generic
+	node.DeviceClass.Specific = nodeProtocolInfo.DeviceClass.Specific
 
 	// If it's a listening device, we can issue more commands to it
-	if node.listening {
+	if node.Listening {
+		node.mutex.Unlock()
+		channel := make(chan *ApplicationUpdateData, 1)
+		node.AddApplicationUpdateCallbackChannel(channel)
+		defer node.RemoveApplicationUpdateCallbackChannel(channel)
+		node.mutex.Lock()
+
 		// Fill supported command classes
-		channelA := make(chan int, 1)
-		// FIXME: this is not goroutine safe and multiple Refresh could stall...
-		node.requestNodeInfoComplete = channelA
 		if err := node.zWRequestNodeInfo(); err != nil {
 			node.mutex.Unlock()
 			return err
 		}
 
-		// Unlock to allow for update
 		node.mutex.Unlock()
 
-		select {
-		case <-channelA:
-			// Finished getting command classes
+		end := time.Now().Add(responseTimeout)
+	outer:
+		for {
+			now := time.Now()
+			timeLeft := end.Sub(now)
 
-		case <-time.After(responseTimeout):
-			return fmt.Errorf("Timed out waiting for command classes")
+			if now.After(end) {
+				return fmt.Errorf("Timed out waiting for node info data")
+			}
+
+			select {
+			case response := <-channel:
+				if response.Status != message.ZWApplicationUpdateStateReceived {
+					continue
+				}
+
+				data := response.Data
+				if len(data) < 3 {
+					return fmt.Errorf("ZWApplicationUpdateStateReceived too short: %d < 3",
+						len(response.Data))
+				}
+
+				// Lock again because we're updating
+				node.mutex.Lock()
+
+				// NOTE: zWGetNodeProtocolInfo also does device class, but does not do
+				//       command classes
+				// Update DeviceClass
+				node.DeviceClass.Basic = data[0]
+				node.DeviceClass.Generic = data[1]
+				node.DeviceClass.Specific = data[2]
+
+				// Update CommandClasses
+				node.CommandClasses = []uint8{}
+				node.ControlCommandClasses = []uint8{}
+
+				// NOTE: CommandClasses before CommandClassMark are those supported by
+				//       the Node, while the CommandClasses after CommandClassMark are
+				//       those which the Node can control
+				afterMark := false
+				for _, x := range data[3:] {
+					if !afterMark && x == CommandClassMark {
+						afterMark = true
+					} else if !afterMark {
+						node.CommandClasses = append(node.CommandClasses, x)
+					} else { // afterMark
+						node.ControlCommandClasses = append(node.ControlCommandClasses, x)
+					}
+				}
+
+				node.mutex.Unlock()
+
+				break outer
+
+			case <-time.After(timeLeft):
+				return fmt.Errorf("Timed out waiting for response")
+			}
 		}
 
 		// Check if we can get manufacturer information
 		if manuf := node.GetManufacturerSpecific(); manuf != nil {
-			manufacturerID, productType, productID, err := manuf.Report()
+			manufacturerID, productType, productID, err := manuf.Get()
 			if err != nil {
 				return err
 			}
 			node.mutex.Lock()
-			node.manufacturer.id = manufacturerID
-			node.product.typ = productType
-			node.product.id = productID
+			node.Manufacturer.ID = manufacturerID
+			node.Product.Type = productType
+			node.Product.ID = productID
 			node.mutex.Unlock()
 		}
 	} else {
-		// Fill supported command classes based on device class
-		// TODO:
+		// Can't fill anything in
 		node.mutex.Unlock()
 	}
 
+	return nil
+}
+
+// RefreshWithIDs using the manufacturer information and local database
+func (node *Node) RefreshWithIDs(manufacturerID uint16, productID uint16, typeID uint16) error {
+	// TODO: implement
 	return nil
 }
 
@@ -168,16 +234,22 @@ func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand)
 	// Compute lookup key
 	key := commandClassIDsToMapKey(commandClassID, commandID)
 
-	// Loop over oneShotCallbacks and longCallbacks
 	for i := 0; i < 2; i++ {
-		var callbacks map[chan *applicationCommandData]chan *applicationCommandData
+		var callbacks map[chan *ApplicationCommandData]chan *ApplicationCommandData
 		var ok bool
 
 		// Choose map depending on loop
-		if i == 0 {
-			callbacks, ok = node.oneShotCallbacks[key]
-		} else {
-			callbacks, ok = node.longCallbacks[key]
+		ok = false
+		switch i {
+		case 0:
+			callbacks, ok = node.keyCallbacks[key]
+
+		case 1:
+			callbacks = node.applicationCommandCallbacks
+			ok = callbacks != nil
+
+		default:
+
 		}
 
 		// No map
@@ -187,7 +259,7 @@ func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand)
 
 		for _, channel := range callbacks {
 			// Create copy for channel callback
-			data := applicationCommandData{Status: command.Status, NodeID: command.NodeID}
+			data := ApplicationCommandData{Status: command.Status, NodeID: command.NodeID}
 			data.Command.ClassID = commandClassID
 			data.Command.ID = commandID
 			data.Command.Data = make([]uint8, len(commandData))
@@ -197,11 +269,6 @@ func (node *Node) ApplicationCommandHandler(command *message.ApplicationCommand)
 				// Send to channel
 				channel <- &data
 			}()
-
-			// If its a one shot callback, then delete the channel
-			if i == 0 {
-				delete(callbacks, channel)
-			}
 		}
 	}
 }
@@ -213,43 +280,15 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
 
-	switch update.Status {
-	case message.ZWApplicationUpdateStateReceived:
-		if len(update.Body) < 3 {
-			log.Printf("ERROR body message.ZWApplicationUpdateStateReceived too short: %d",
-				len(update.Body))
-			break
-		}
-		// NOTE: zWGetNodeProtocolInfo also does device class, but does not do
-		//       command classes
-		// Update DeviceClass
-		node.deviceClass.basic = update.Body[0]
-		node.deviceClass.generic = update.Body[1]
-		node.deviceClass.specific = update.Body[2]
+	// Send to callbacks
+	for channel := range node.applicationUpdateCallbacks {
+		data := ApplicationUpdateData{Status: update.Status, NodeID: node.ID}
+		data.Data = make([]uint8, len(update.Body))
+		copy(data.Data, update.Body)
 
-		// Update CommandClasses
-		node.commandClasses = []uint8{}
-		node.controlCommandClasses = []uint8{}
-
-		// NOTE: CommandClasses before CommandClassMark are those supported by
-		//       the Node, while the CommandClasses after CommandClassMark are
-		//       those which the Node can control
-		afterMark := false
-		for _, x := range update.Body[3:] {
-			if !afterMark && x == CommandClassMark {
-				afterMark = true
-			} else if !afterMark {
-				node.commandClasses = append(node.commandClasses, x)
-			} else { // afterMark
-				node.controlCommandClasses = append(node.controlCommandClasses, x)
-			}
-		}
-
-		// Notify requestNodeInfoComplete
-		if node.requestNodeInfoComplete != nil {
-			node.requestNodeInfoComplete <- 1
-			node.requestNodeInfoComplete = nil
-		}
+		go func() {
+			channel <- &data
+		}()
 	}
 }
 
@@ -258,7 +297,7 @@ func (node *Node) ApplicationUpdateHandler(update *message.ZWApplicationUpdate) 
 // Check if node supports a command class.
 // Assumption: caller holds node lock
 func (node *Node) supportsCommandClass(commandClass uint8) bool {
-	for _, x := range node.commandClasses {
+	for _, x := range node.CommandClasses {
 		if x == commandClass {
 			return true
 		}
@@ -266,28 +305,90 @@ func (node *Node) supportsCommandClass(commandClass uint8) bool {
 	return false
 }
 
-// getOneShotCallbackChannel returns a channel in which the next application
+// getKeyedApplicationCommandCallbackChannel returns a channel in which the next application
 // update result will be sent to
 // Assumption: caller holds node lock
-func (node *Node) getOneShotCallbackChannel(commandClassID uint8, commandID uint8) chan *applicationCommandData {
+func (node *Node) getKeyedApplicationCommandCallbackChannel(commandClassID uint8, commandID uint8) chan *ApplicationCommandData {
 	// make with 1 to not block
-	channel := make(chan *applicationCommandData, 1)
+	channel := make(chan *ApplicationCommandData, 1)
 	key := commandClassIDsToMapKey(commandClassID, commandID)
 
 	// Make map if it does not exist
-	if node.oneShotCallbacks == nil {
-		node.oneShotCallbacks = make(
-			map[uint16]map[chan *applicationCommandData]chan *applicationCommandData)
+	if node.keyCallbacks == nil {
+		node.keyCallbacks = make(
+			map[uint16]map[chan *ApplicationCommandData]chan *ApplicationCommandData)
 	}
 
 	// Create channel map if it does not exist
-	if node.oneShotCallbacks[key] == nil {
-		node.oneShotCallbacks[key] = make(
-			map[chan *applicationCommandData]chan *applicationCommandData)
+	if node.keyCallbacks[key] == nil {
+		node.keyCallbacks[key] = make(
+			map[chan *ApplicationCommandData]chan *ApplicationCommandData)
 	}
 
-	node.oneShotCallbacks[key][channel] = channel
+	node.keyCallbacks[key][channel] = channel
 	return channel
+}
+
+// removeKeyedApplicationCallbackChannel removes the channel from future callbacks
+// Assumption: caller holds node lock
+func (node *Node) removeKeyedApplicationCallbackChannel(channel chan *ApplicationCommandData) {
+	for key := range node.keyCallbacks {
+		delete(node.keyCallbacks[key], channel)
+	}
+
+	close(channel)
+}
+
+// AddApplicationCommandCallbackChannel add the report callback channel
+func (node *Node) AddApplicationCommandCallbackChannel(channel chan *ApplicationCommandData) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	if node.applicationCommandCallbacks == nil {
+		node.applicationCommandCallbacks = make(
+			map[chan *ApplicationCommandData]chan *ApplicationCommandData)
+	}
+
+	node.applicationCommandCallbacks[channel] = channel
+}
+
+// RemoveApplicationCommandCallbackChannel add the report callback channel
+func (node *Node) RemoveApplicationCommandCallbackChannel(channel chan *ApplicationCommandData) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	if node.applicationCommandCallbacks == nil {
+		node.applicationCommandCallbacks = make(
+			map[chan *ApplicationCommandData]chan *ApplicationCommandData)
+	}
+
+	delete(node.applicationCommandCallbacks, channel)
+}
+
+// AddApplicationUpdateCallbackChannel add the report callback channel
+func (node *Node) AddApplicationUpdateCallbackChannel(channel chan *ApplicationUpdateData) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	if node.applicationUpdateCallbacks == nil {
+		node.applicationUpdateCallbacks = make(
+			map[chan *ApplicationUpdateData]chan *ApplicationUpdateData)
+	}
+
+	node.applicationUpdateCallbacks[channel] = channel
+}
+
+// RemoveApplicationUpdateCallbackChannel add the report callback channel
+func (node *Node) RemoveApplicationUpdateCallbackChannel(channel chan *ApplicationUpdateData) {
+	node.mutex.Lock()
+	defer node.mutex.Unlock()
+
+	if node.applicationUpdateCallbacks == nil {
+		node.applicationUpdateCallbacks = make(
+			map[chan *ApplicationUpdateData]chan *ApplicationUpdateData)
+	}
+
+	delete(node.applicationUpdateCallbacks, channel)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -363,6 +464,7 @@ func (node *Node) zWSendData(commandClass uint8, payload []uint8) error {
 	return nil
 }
 
+// zwSendDataRequest sends the ZWSendData request
 func (node *Node) zwSendDataRequest(commandClass uint8, data []uint8) error {
 	node.mutex.Lock()
 	defer node.mutex.Unlock()
@@ -372,10 +474,19 @@ func (node *Node) zwSendDataRequest(commandClass uint8, data []uint8) error {
 	return nil
 }
 
-func (node *Node) zwSendDataWaitForResponse(commandClass uint8, data []uint8, command uint8) (*applicationCommandData, error) {
+// zwSendDataWaitForResponse sends the ZWSendData request, and awaits the
+// ApplicationCommandUpdate for the specified command, and can additionally wait
+// until optional filter returns true
+func (node *Node) zwSendDataWaitForResponse(commandClass uint8,
+	data []uint8, command uint8, filter applicationCallbackFilter) (*ApplicationCommandData, error) {
 	node.mutex.Lock()
 
-	channel := node.getOneShotCallbackChannel(commandClass, command)
+	channel := node.getKeyedApplicationCommandCallbackChannel(commandClass, command)
+	defer func() {
+		node.mutex.Lock()
+		node.removeKeyedApplicationCallbackChannel(channel)
+		node.mutex.Unlock()
+	}()
 
 	if err := node.zWSendData(commandClass, data); err != nil {
 		node.mutex.Unlock()
@@ -383,11 +494,24 @@ func (node *Node) zwSendDataWaitForResponse(commandClass uint8, data []uint8, co
 	}
 	node.mutex.Unlock()
 
-	select {
-	case response := <-channel:
-		return response, nil
+	end := time.Now().Add(responseTimeout)
+	for {
+		now := time.Now()
+		timeLeft := end.Sub(now)
 
-	case <-time.After(responseTimeout):
-		return nil, fmt.Errorf("Timed out waiting for response")
+		if now.After(end) {
+			return nil, fmt.Errorf("Timed out waiting for response")
+		}
+
+		select {
+		case response := <-channel:
+			if filter != nil && !filter(response) {
+				continue
+			}
+			return response, nil
+
+		case <-time.After(timeLeft):
+			return nil, fmt.Errorf("Timed out waiting for response")
+		}
 	}
 }

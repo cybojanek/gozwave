@@ -43,16 +43,18 @@ func (node *Node) GetClock() *Clock {
 	return nil
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 // Get time of the clock in weekday, hour, and minute.
 // weekday is in the range of [0, 7], where 0 is unknown, and [1, 7] is
 // Monday through Sunday, hour is in the range [0, 23], and minute is in the
 // range of [0, 59]
 func (node *Clock) Get() (uint8, uint8, uint8, error) {
 	// Issue request
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
 	if response, err = node.zwSendDataWaitForResponse(
-		CommandClassClock, []uint8{clockGet}, clockReport); err != nil {
+		CommandClassClock, []uint8{clockGet}, clockReport, nil); err != nil {
 		return 0, 0, 0, err
 	}
 

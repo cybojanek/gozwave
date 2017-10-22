@@ -23,8 +23,11 @@ import (
 )
 
 const (
-	meterCommandGet    uint8 = 0x01
-	meterCommandReport       = 0x02
+	meterCommandGet             uint8 = 0x01
+	meterCommandReport                = 0x02
+	meterCommandSupportedGet          = 0x03
+	meterCommandSupportedReport       = 0x04
+	meterCommandReset                 = 0x05
 )
 
 // Meter Type
@@ -36,7 +39,7 @@ const (
 	MeterTypeCooling        = 0x05
 )
 
-// Meter Scale
+// Meter Scale ELectric
 const (
 	MeterScaleElectricKWH         uint8 = 0x00
 	MeterScaleElectricKVAH              = 0x01
@@ -46,21 +49,33 @@ const (
 	MeterScaleElectricA                 = 0x05
 	MeterScaleElectricPowerFactor       = 0x06
 	MeterScaleElectricMST               = 0x07
+)
 
-	MeterScaleGasCubicMeters = 0x00
-	MeterScaleGasCubicFeet   = 0x01
-	MeterScaleGasPulseCount  = 0x03
-	MeterScaleGasMST         = 0x07
+// Meter Scale Gas
+const (
+	MeterScaleGasCubicMeters uint8 = 0x00
+	MeterScaleGasCubicFeet         = 0x01
+	MeterScaleGasPulseCount        = 0x03
+	MeterScaleGasMST               = 0x07
+)
 
-	MeterScaleWaterCubicMeters     = 0x00
-	MeterScaleWaterCubicFeet       = 0x01
-	MeterScaleWaterCubicUSGallons  = 0x02
-	MeterScaleWaterCubicPulseCount = 0x03
-	MeterScaleWaterMST             = 0x07
+// Meter Scale Water
+const (
+	MeterScaleWaterCubicMeters     uint8 = 0x00
+	MeterScaleWaterCubicFeet             = 0x01
+	MeterScaleWaterCubicUSGallons        = 0x02
+	MeterScaleWaterCubicPulseCount       = 0x03
+	MeterScaleWaterMST                   = 0x07
+)
 
-	MeterScaleHeatingKWH = 0x00
+// Meter Scale Heating
+const (
+	MeterScaleHeatingKWH uint8 = 0x00
+)
 
-	MeterScaleCoolingKWH = 0x00
+// Meter Scale Cooling
+const (
+	MeterScaleCoolingKWH uint8 = 0x00
 )
 
 // Rate Type
@@ -97,26 +112,49 @@ func (node *Node) GetMeter() *Meter {
 	return nil
 }
 
-// Get current value. Supports both V1 and V2.
+////////////////////////////////////////////////////////////////////////////////
+
+// Get current value
 func (node *Meter) Get() (*MeterResult, error) {
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
-	var result MeterResult
 
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassMeter, []uint8{meterCommandGet},
-		meterCommandReport); err != nil {
+		meterCommandReport, nil); err != nil {
 		return nil, err
 	}
 
-	data := response.Command.Data
+	return node.ParseReport(response)
+}
 
+// IsReport checks if the report is a ParseReport
+func (node *Meter) IsReport(report *ApplicationCommandData) bool {
+	return report.Command.ID == meterCommandReport
+}
+
+// ParseReport of status
+func (node *Meter) ParseReport(report *ApplicationCommandData) (*MeterResult, error) {
+	var result MeterResult
+	var err error
+
+	if report.Command.ClassID != CommandClassMeter {
+		return nil, fmt.Errorf("Bad Report Command Class ID: 0x%02x != 0x%02x",
+			report.Command.ClassID, CommandClassMeter)
+	}
+
+	if report.Command.ID != meterCommandReport {
+		return nil, fmt.Errorf("Bad Report Command ID 0x%02x != 0x%02x",
+			report.Command.ID, meterCommandReport)
+	}
+
+	data := report.Command.Data
 	if len(data) < 3 {
 		return nil, fmt.Errorf("Bad response, data too short %d < %d", len(data))
 	}
 
 	// Process MeterType
-	// NOTE: this handles both V1, V2
+	// NOTE: this handles both V1, V2, V3
 	meterType := data[0] & 0x1f
 	switch meterType {
 	case MeterTypeElectric, MeterTypeGas, MeterTypeWater, MeterTypeHeating, MeterTypeCooling:
@@ -140,43 +178,9 @@ func (node *Meter) Get() (*MeterResult, error) {
 
 	// What is it reporting KWH, KVAH, etc...
 	scale := uint8((data[1] >> 3) & 0x3)
-	switch meterType {
-	case MeterTypeElectric:
-		switch scale {
-		case MeterScaleElectricKWH, MeterScaleElectricKVAH, MeterScaleElectricW, MeterScaleElectricPulseCount, MeterScaleElectricV, MeterScaleElectricA, MeterScaleElectricPowerFactor, MeterScaleElectricMST:
-			result.MeterType = meterType
-		default:
-			return nil, fmt.Errorf("Unknown scale 0x%02x for type Electric", scale)
-		}
-	case MeterTypeGas:
-		switch scale {
-
-		case MeterScaleGasCubicMeters, MeterScaleGasCubicFeet, MeterScaleGasPulseCount, MeterScaleGasMST:
-			result.MeterType = meterType
-		default:
-			return nil, fmt.Errorf("Unknown scale 0x%02x for type Gas", scale)
-		}
-	case MeterTypeWater:
-		switch scale {
-		case MeterScaleWaterCubicMeters, MeterScaleWaterCubicFeet, MeterScaleWaterCubicUSGallons, MeterScaleWaterCubicPulseCount, MeterScaleWaterMST:
-			result.MeterType = meterType
-		default:
-			return nil, fmt.Errorf("Unknown scale 0x%02x for type Water", scale)
-		}
-	case MeterTypeHeating:
-		switch scale {
-		case MeterScaleHeatingKWH:
-			result.MeterType = meterType
-		default:
-			return nil, fmt.Errorf("Unknown scale 0x%02x for type Heating", scale)
-		}
-	case MeterTypeCooling:
-		switch scale {
-		case MeterScaleCoolingKWH:
-			result.MeterType = meterType
-		default:
-			return nil, fmt.Errorf("Unknown scale 0x%02x for type Cooling", scale)
-		}
+	// Handle V3
+	if (data[0] & 0x80) != 0 {
+		scale |= 4
 	}
 
 	// Bytes of data
@@ -223,7 +227,207 @@ func (node *Meter) Get() (*MeterResult, error) {
 		offset += int(size)
 	}
 
-	// NOTE: it looks like there might be 4 extra 0 bytes? Why?
+	// Handle V4
+	if len(data) > offset && scale == 0x7 {
+		// Actual scale is in Scale2 byte
+		scale = data[offset]
+		offset++
+	}
+	result.MeterScale = scale
+
+	switch meterType {
+	case MeterTypeElectric:
+		switch scale {
+		case MeterScaleElectricKWH, MeterScaleElectricKVAH, MeterScaleElectricW, MeterScaleElectricPulseCount, MeterScaleElectricV, MeterScaleElectricA, MeterScaleElectricPowerFactor, MeterScaleElectricMST:
+			result.MeterType = meterType
+		default:
+			return nil, fmt.Errorf("Unknown scale 0x%02x for type Electric", scale)
+		}
+	case MeterTypeGas:
+		switch scale {
+
+		case MeterScaleGasCubicMeters, MeterScaleGasCubicFeet, MeterScaleGasPulseCount, MeterScaleGasMST:
+			result.MeterType = meterType
+		default:
+			return nil, fmt.Errorf("Unknown scale 0x%02x for type Gas", scale)
+		}
+	case MeterTypeWater:
+		switch scale {
+		case MeterScaleWaterCubicMeters, MeterScaleWaterCubicFeet, MeterScaleWaterCubicUSGallons, MeterScaleWaterCubicPulseCount, MeterScaleWaterMST:
+			result.MeterType = meterType
+		default:
+			return nil, fmt.Errorf("Unknown scale 0x%02x for type Water", scale)
+		}
+	case MeterTypeHeating:
+		switch scale {
+		case MeterScaleHeatingKWH:
+			result.MeterType = meterType
+		default:
+			return nil, fmt.Errorf("Unknown scale 0x%02x for type Heating", scale)
+		}
+	case MeterTypeCooling:
+		switch scale {
+		case MeterScaleCoolingKWH:
+			result.MeterType = meterType
+		default:
+			return nil, fmt.Errorf("Unknown scale 0x%02x for type Cooling", scale)
+		}
+	}
 
 	return &result, nil
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// GetV2 the current value in the requested scale
+func (node *Meter) GetV2(scaleType uint8) (*MeterResult, error) {
+	if (scaleType & 0x3) != scaleType {
+		return nil, fmt.Errorf("Scale out of range [0, 3]")
+	}
+
+	var response *ApplicationCommandData
+	var err error
+
+	filter := func(response *ApplicationCommandData) bool {
+		if result, err := node.ParseReport(response); err == nil && result.MeterScale == scaleType {
+			return true
+		}
+		return false
+	}
+
+	if response, err = node.zwSendDataWaitForResponse(
+		CommandClassMeter, []uint8{meterCommandGet, scaleType << 3},
+		meterCommandReport, filter); err != nil {
+		return nil, err
+	}
+
+	return node.ParseReport(response)
+}
+
+// GetSupported queries the meter to get the supported operations information
+func (node *Meter) GetSupported() (canReset bool, rateType uint8, meterType uint8, scales []uint8, err error) {
+	var response *ApplicationCommandData
+
+	if response, err = node.zwSendDataWaitForResponse(
+		CommandClassMeter, []uint8{meterCommandSupportedGet},
+		meterCommandSupportedReport, nil); err != nil {
+		return
+	}
+
+	data := response.Command.Data
+	if len(data) < 2 {
+		err = fmt.Errorf("Response size mismatch %d < 2", len(data))
+		return
+	}
+
+	canReset = (data[0] & 0x80) != 0
+	// Rate Type is V4 extension
+	rateType = (data[0] >> 5) & 0x3
+	meterType = (data[0] & 0x1f)
+
+	// Get first 7 bits
+	scaleType := uint8(0)
+	for i := uint32(0); i < 7; i++ {
+		if (data[1] & (1 << i)) != 0 {
+			scales = append(scales, scaleType)
+		}
+		scaleType++
+	}
+
+	// FIXME: looks like there are still trom trailing bytes in V4?
+
+	// Handle V4 extension
+	if (data[1] & 0x80) != 0 {
+		scaleBytes := data[2:]
+		if len(scaleBytes) == 0 {
+			err = fmt.Errorf("Scales bytes missing")
+			return
+		} else if len(scaleBytes)-1 != int(scaleBytes[0]) {
+			err = fmt.Errorf("Scales bytes size mismatch %d != %d",
+				len(scaleBytes)-1, scaleBytes[0])
+			return
+		}
+
+		for _, b := range scaleBytes[1:] {
+			for i := uint32(0); i < 8; i++ {
+				if (b & (1 << i)) != 0 {
+					scales = append(scales, scaleType)
+				}
+				scaleType++
+			}
+		}
+
+	} else if len(data) != 2 {
+		err = fmt.Errorf("Response size mismatch %d != 2", len(data))
+		return
+	}
+
+	return
+}
+
+// Reset meter
+func (node *Meter) Reset() error {
+	return node.zwSendDataRequest(CommandClassMeter, []uint8{meterCommandReset})
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// GetV3 the current value in the requested scale
+func (node *Meter) GetV3(scaleType uint8) (*MeterResult, error) {
+	if (scaleType & 0x7) != scaleType {
+		return nil, fmt.Errorf("Scale out of range [0, 7]")
+	}
+
+	var response *ApplicationCommandData
+	var err error
+
+	filter := func(response *ApplicationCommandData) bool {
+		if result, err := node.ParseReport(response); err == nil && result.MeterScale == scaleType {
+			return true
+		}
+		return false
+	}
+
+	if response, err = node.zwSendDataWaitForResponse(
+		CommandClassMeter, []uint8{meterCommandGet, scaleType << 3},
+		meterCommandReport, filter); err != nil {
+		return nil, err
+	}
+
+	return node.ParseReport(response)
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
+// GetV4 the current value in the requested scale
+func (node *Meter) GetV4(scaleType uint8, rateType uint8) (*MeterResult, error) {
+	if (rateType & 0x3) != rateType {
+		return nil, fmt.Errorf("Scale out of range [0, 3]")
+	}
+
+	var response *ApplicationCommandData
+	var err error
+
+	filter := func(response *ApplicationCommandData) bool {
+		if result, err := node.ParseReport(response); err == nil && result.MeterScale == scaleType && result.RateType == rateType {
+			return true
+		}
+		return false
+	}
+
+	data := []uint8{meterCommandGet, rateType << 6}
+	if scaleType <= 0x7 {
+		// FIXME: is this required?
+		data[1] |= (scaleType << 3)
+	} else {
+		data[1] |= (0x7 << 3)
+		data = append(data, scaleType)
+	}
+
+	if response, err = node.zwSendDataWaitForResponse(
+		CommandClassMeter, data, meterCommandReport, filter); err != nil {
+		return nil, err
+	}
+
+	return node.ParseReport(response)
 }

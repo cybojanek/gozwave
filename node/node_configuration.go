@@ -16,10 +16,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// FIXME: The current callback mechanism structure means that if we get
-// 		  different configuration values for the same node at the same time,
-// 		  some of those requests would fail, because the first callback to
-// 		  reach us might be for a different parameter
 // NOTE: If a value does not exist, then a single byte value of 0 might be returned
 
 import (
@@ -59,12 +55,16 @@ func (node *Configuration) getValue(parameter uint8, size uint8) ([]uint8, error
 		return nil, fmt.Errorf("Bad request size: %d", size)
 	}
 
+	filter := func(response *ApplicationCommandData) bool {
+		return len(response.Command.Data) > 1 && response.Command.Data[0] == parameter
+	}
+
 	// Issue request
-	var response *applicationCommandData
+	var response *ApplicationCommandData
 	var err error
 	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassConfiguration, []uint8{configurationGet, parameter},
-		configurationReport); err != nil {
+		configurationReport, filter); err != nil {
 		return nil, err
 	}
 
@@ -75,11 +75,7 @@ func (node *Configuration) getValue(parameter uint8, size uint8) ([]uint8, error
 			len(data), 2+size)
 	}
 
-	if data[0] != parameter {
-		// Validate parameter
-		return nil, fmt.Errorf("Parameter mismatch: 0x%02x != 0x%02x",
-			data[0], parameter)
-	} else if data[1] != size {
+	if data[1] != size {
 		// Validate size
 		return nil, fmt.Errorf("Bad size: 0x%02x != 0x%02x", data[1], size)
 	}

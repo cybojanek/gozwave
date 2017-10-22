@@ -43,19 +43,21 @@ func (node *Node) GetManufacturerSpecific() *ManufacturerSpecific {
 	return nil
 }
 
-// Report of manufacturer and product information
-func (node *ManufacturerSpecific) Report() (manufacturerID uint16, productType uint16, productID uint16, err error) {
-	var response *applicationCommandData
-	response, err = node.zwSendDataWaitForResponse(
+////////////////////////////////////////////////////////////////////////////////
+
+// Get manufacturer and product information
+func (node *ManufacturerSpecific) Get() (manufacturerID uint16, productType uint16, productID uint16, err error) {
+	var response *ApplicationCommandData
+
+	if response, err = node.zwSendDataWaitForResponse(
 		CommandClassManufacturerSpecific, []uint8{manufacturerSpecificCommandGet},
-		manufacturerSpecificCommandReport)
-	if err != nil {
+		manufacturerSpecificCommandReport, nil); err != nil {
 		return
 	}
 
 	data := response.Command.Data
 	if len(data) != 6 {
-		err = fmt.Errorf("Unexpected length: %d", len(data))
+		err = fmt.Errorf("Bad data length: %d != 6", len(data))
 		return
 	}
 

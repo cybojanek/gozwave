@@ -57,6 +57,7 @@ const (
 // Command Class
 const (
 	CommandClassNoOperation                 uint8 = 0x01
+	CommandClassBasic                             = 0x20
 	CommandClassBinarySwitch                      = 0x25
 	CommandClassMultiLevelSwitch                  = 0x26
 	CommandClassAllSwitch                         = 0x27
@@ -67,9 +68,12 @@ const (
 	CommandClassAssociationGroupInformation       = 0x59
 	CommandClassZwavePlusInfo                     = 0x5e
 	CommandClassConfiguration                     = 0x70
+	CommandClassAlarm                             = 0x71 // Same as Notification
+	CommandClassNotification                      = 0x71 // Same as Alarm
 	CommandClassManufacturerSpecific              = 0x72
 	CommandClassFirmwareUpdateMetadata            = 0x73
 	CommandClassNodeNamingAndLocation             = 0x77
+	CommandClassBattery                           = 0x80
 	CommandClassClock                             = 0x81
 	CommandClassWakeup                            = 0x84
 	CommandClassAssociation                       = 0x85
