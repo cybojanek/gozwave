@@ -233,12 +233,7 @@ func DecodeFloat(bytes []uint8, precision uint8) (float32, error) {
 	strDecimal = fmt.Sprintf("%s%d.%s", signChar, value, strDecimal)
 
 	// Parse to float
-	var f float64
-	var err error
-	f, err = strconv.ParseFloat(strDecimal, 32)
-	if err != nil {
-		return 0, err
-	}
+	f, _ := strconv.ParseFloat(strDecimal, 32)
 
 	return float32(f), nil
 }

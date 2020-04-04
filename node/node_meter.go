@@ -150,7 +150,7 @@ func (node *Meter) ParseReport(report *ApplicationCommandData) (*MeterResult, er
 
 	data := report.Command.Data
 	if len(data) < 3 {
-		return nil, fmt.Errorf("Bad response, data too short %d < %d", len(data))
+		return nil, fmt.Errorf("Bad response, data too short %d < 3", len(data))
 	}
 
 	// Process MeterType

@@ -61,6 +61,20 @@ func TestEncodeDecodeDuration(t *testing.T) {
 			t.Errorf("Failed to decode byte: 0x%02x", i)
 		}
 	}
+
+	// Encode bad seconds
+	for i := 128; i < 180; i++ {
+		if _, err := EncodeDuration(time.Second * time.Duration(i)); err == nil {
+			t.Errorf("Encoding did not fail for %d seconds", i)
+		}
+	}
+
+	// Encode bad minutes
+	for i := 128; i < 256; i++ {
+		if _, err := EncodeDuration(time.Minute * time.Duration(i)); err == nil {
+			t.Errorf("Encoding did not fail for %d minutes", i)
+		}
+	}
 }
 
 func TestDecodeFloat(t *testing.T) {

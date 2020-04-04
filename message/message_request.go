@@ -27,9 +27,7 @@ func GetVersionRequest() *packet.Packet {
 		PacketType:  packet.PacketTypeRequest,
 		MessageType: MessageTypeGetVersion}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p
 }
@@ -40,9 +38,7 @@ func MemoryGetIDRequest() *packet.Packet {
 		PacketType:  packet.PacketTypeRequest,
 		MessageType: MessageTypeMemoryGetID}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p
 }
@@ -53,9 +49,7 @@ func SerialAPIGetInitDataRequest() *packet.Packet {
 		PacketType:  packet.PacketTypeRequest,
 		MessageType: MessageTypeSerialAPIGetInitData}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p
 }
@@ -67,9 +61,7 @@ func SerialAPIGetCapabilitiesRequest() *packet.Packet {
 		PacketType:  packet.PacketTypeRequest,
 		MessageType: MessageTypeSerialAPIGetCapabilities}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p
 }
@@ -81,9 +73,7 @@ func ZWGetControllerCapabilitiesRequest() *packet.Packet {
 		PacketType:  packet.PacketTypeRequest,
 		MessageType: MessageTypeZWGetControllerCapabilities}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p
 }
@@ -100,9 +90,7 @@ func ZWGetNodeProtocolInfoRequest(nodeID uint8) (*packet.Packet, error) {
 		MessageType: MessageTypeZWGetNodeProtocolInfo,
 		Body:        []uint8{nodeID}}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p, nil
 }
@@ -119,9 +107,7 @@ func ZWRequestNodeInfoRequest(nodeID uint8) (*packet.Packet, error) {
 		MessageType: MessageTypeZWRequestNodeInfo,
 		Body:        []uint8{nodeID}}
 
-	if err := p.Update(); err != nil {
-		panic(fmt.Sprintf("This should never fail: %v", err))
-	}
+	p.Update()
 
 	return &p, nil
 }

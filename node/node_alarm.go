@@ -130,7 +130,8 @@ func (node *Alarm) ParseReport(report *ApplicationCommandData) (isActive bool, a
 	// TODO: Better V2/Notification support
 	if len(data) > 2 {
 		if len(data) < 7 {
-			err = fmt.Errorf("Bad Report Data length %d > 2 but %d < 7", len(data))
+			err = fmt.Errorf("Bad Report Data length %d > 2 but %d < 7",
+				len(data), len(data))
 			return
 		}
 

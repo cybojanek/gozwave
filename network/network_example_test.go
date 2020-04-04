@@ -89,7 +89,7 @@ outer:
 			case node.CommandClassAlarm:
 				alarm := n.GetAlarm()
 				if alarm == nil {
-					fmt.Printf("Node %d is not an alarm\n")
+					fmt.Printf("Node %d is not an alarm\n", n.ID)
 					continue
 				}
 
@@ -104,7 +104,7 @@ outer:
 			case node.CommandClassBattery:
 				battery := n.GetBattery()
 				if battery == nil {
-					fmt.Printf("Node %d is not a battery")
+					fmt.Printf("Node %d is not a battery\n", n.ID)
 					continue
 				}
 
@@ -120,7 +120,7 @@ outer:
 			case node.CommandClassBinarySensor:
 				sensor := n.GetBinarySensor()
 				if sensor == nil {
-					fmt.Printf("Node %d is not a binary sensor\n")
+					fmt.Printf("Node %d is not a binary sensor\n", n.ID)
 					continue
 				}
 
@@ -135,7 +135,7 @@ outer:
 			case node.CommandClassBinarySwitch:
 				bs := n.GetBinarySwitch()
 				if bs == nil {
-					fmt.Printf("Node %d is not a binary switch\n")
+					fmt.Printf("Node %d is not a binary switch\n", n.ID)
 					continue
 				}
 

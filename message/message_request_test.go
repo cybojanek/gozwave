@@ -22,22 +22,24 @@ import (
 	"testing"
 )
 
+func TestGetVersionRequest(t *testing.T) {
+	GetVersionRequest()
+}
+
+func TestMemoryGetIDRequest(t *testing.T) {
+	MemoryGetIDRequest()
+}
+
 func TestSerialAPIGetInitDataRequest(t *testing.T) {
-	if p := SerialAPIGetInitDataRequest(); p == nil {
-		t.Logf("Expected non nil packet")
-	}
+	SerialAPIGetInitDataRequest()
 }
 
 func TestSerialAPIGetCapabilitiesRequest(t *testing.T) {
-	if p := SerialAPIGetCapabilitiesRequest(); p == nil {
-		t.Logf("Expected non nil packet")
-	}
+	SerialAPIGetCapabilitiesRequest()
 }
 
 func TestZWGetControllerCapabilitiesRequest(t *testing.T) {
-	if p := ZWGetControllerCapabilitiesRequest(); p == nil {
-		t.Logf("Expected non nil packet")
-	}
+	ZWGetControllerCapabilitiesRequest()
 }
 
 func TestZWGetNodeProtocolInfoRequest(t *testing.T) {
@@ -46,11 +48,64 @@ func TestZWGetNodeProtocolInfoRequest(t *testing.T) {
 		p, err := ZWGetNodeProtocolInfoRequest(nodeID)
 		if IsValidNodeID(nodeID) {
 			if p == nil || err != nil {
-				t.Logf("Expected non nil packet and nil error: %v %v", p, err)
+				t.Errorf("Expected non nil packet and nil error: %v %v", p, err)
 			}
 		} else {
 			if p != nil || err == nil {
-				t.Logf("Expected nil packet and non nil error: %v %v", p, err)
+				t.Errorf("Expected nil packet and non nil error: %v %v", p, err)
+			}
+		}
+	}
+}
+
+func TestZWRequestNodeInfoRequest(t *testing.T) {
+	for i := 0; i < 0xff; i++ {
+		nodeID := uint8(i)
+		p, err := ZWRequestNodeInfoRequest(nodeID)
+		if IsValidNodeID(nodeID) {
+			if p == nil || err != nil {
+				t.Errorf("Expected non nil packet and nil error: %v %v", p, err)
+			}
+		} else {
+			if p != nil || err == nil {
+				t.Errorf("Expected nil packet and non nil error: %v %v", p, err)
+			}
+		}
+	}
+}
+
+func TestZWSendDataRequest(t *testing.T) {
+	// -3 for package and -5 for ZWSendDataRequest
+	maxPayloadLength := 0xff - 3 - 4
+
+	for i := 0; i < 0xff; i++ {
+		nodeID := uint8(i)
+
+		for b := 0; b < maxPayloadLength+1; b++ {
+			payload := make([]uint8, b)
+
+			// No callbackID
+			p, err := ZWSendDataRequest(nodeID, 0, payload, 0, 0)
+			if IsValidNodeID(nodeID) && b <= maxPayloadLength {
+				if p == nil || err != nil {
+					t.Errorf("Expected non nil packet and nil error: %v %v", p, err)
+				}
+			} else {
+				if p != nil || err == nil {
+					t.Errorf("Expected nil packet and non nil error: %v %v", p, err)
+				}
+			}
+
+			// With callbackID
+			p, err = ZWSendDataRequest(nodeID, 0, payload, 0, 1)
+			if IsValidNodeID(nodeID) && b <= maxPayloadLength-1 {
+				if p == nil || err != nil {
+					t.Errorf("Expected non nil packet and nil error: %v %v", p, err)
+				}
+			} else {
+				if p != nil || err == nil {
+					t.Errorf("Expected nil packet and non nil error: %v %v", p, err)
+				}
 			}
 		}
 	}

@@ -1,12 +1,15 @@
 language: go
 
 go:
-  - 1.9
+  - 1.10
 
 install:
   - go get github.com/tarm/serial
 
-script: ./test.sh
+script:
+  - go test -short -v -covermode=count -coverprofile=coverage.txt ./...
+  - GOOS=linux GOARCH=amd64 go build ./...
+  - GOOS=windows GOARCH=amd64 go build ./...
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)

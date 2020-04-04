@@ -133,7 +133,8 @@ func (packet *Packet) Update() error {
 
 	// Check Length
 	if len(packet.Body) > 0xff-3 {
-		return fmt.Errorf("Packet Body is too long: %d > %d", len(packet.Body), 0xff-3)
+		return fmt.Errorf("Packet Body is too long: %d > %d",
+			len(packet.Body), 0xff-3)
 	}
 
 	// Minimum length
@@ -170,9 +171,11 @@ func (parser *Parser) Parse(b uint8) (*Packet, error) {
 	switch parser.state {
 
 	case packetParseStatePreamble:
+		// Check for packet preamble.
 		switch b {
 
 		case PacketPreambleACK, PacketPreambleNAK, PacketPreambleCAN:
+			// These are one byte packets.
 			return &Packet{Preamble: b}, nil
 
 		case PacketPreambleSOF:
@@ -185,6 +188,7 @@ func (parser *Parser) Parse(b uint8) (*Packet, error) {
 		}
 
 	case packetParseStateLength:
+		// Need a least length 3: Packet Type, Message Type, Packet Checksum
 		if b < 3 {
 			e = fmt.Errorf("Bad length: %d", b)
 			goto reset
@@ -221,16 +225,16 @@ func (parser *Parser) Parse(b uint8) (*Packet, error) {
 		}
 
 	case packetParseStateChecksum:
-		// NOTE: this should be unreachable
 		if err := parser.packet.Update(); err != nil {
-			e = fmt.Errorf("Failed to compute checksum: %v %v", parser.packet, err)
+			e = fmt.Errorf("Failed to compute checksum: %v %v",
+				parser.packet, err)
 			goto reset
 		}
 
-		if parser.packet.Checksum == b {
-			p = parser.packet
-		} else {
+		if parser.packet.Checksum != b {
 			e = fmt.Errorf("Failed to validate checksum: %v", parser.packet)
+		} else {
+			p = parser.packet
 		}
 		goto reset
 
@@ -242,8 +246,7 @@ func (parser *Parser) Parse(b uint8) (*Packet, error) {
 	return nil, nil
 
 reset:
-	parser.state = packetParseStatePreamble
-	parser.packet = nil
+	parser.Reset()
 
 	return p, e
 }

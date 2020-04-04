@@ -30,6 +30,10 @@ func ApplicationCommandResponse(p *packet.Packet) (*ApplicationCommand, error) {
 		return nil, fmt.Errorf("Bad MessageType: %d", p.MessageType)
 	}
 
+	if len(p.Body) < 3 {
+		return nil, fmt.Errorf("Bad Body length %d", len(p.Body))
+	}
+
 	message := ApplicationCommand{Status: p.Body[0], NodeID: p.Body[1]}
 
 	// This should match up to the rest of the packet length
