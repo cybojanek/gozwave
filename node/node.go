@@ -18,6 +18,7 @@ limitations under the License.
 */
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/cybojanek/gozwave/controller"
@@ -95,19 +96,55 @@ func commandClassIDsToMapKey(commandClassID uint8, commandID uint8) uint16 {
 	return (uint16(commandClassID) << 8) | (uint16(commandID))
 }
 
-// Refresh the node information: Listening, DeviceClass, CommandClasses.
-func (node *Node) Refresh() error {
+const NODE_CACHE_VERSION = "d55bb26e8f524ae2"
+
+type nodeCache struct {
+	Version               string
+	NodeProtocolInfo      message.ZWGetNodeProtocolInfo
+	ApplicationUpdateData ApplicationUpdateData
+
+	Manufacturer struct {
+		ID uint16
+	}
+	Product struct {
+		ID   uint16
+		Type uint16
+	}
+}
+
+// Load the node information: Listening, DeviceClass, CommandClasses.
+func (node *Node) Load(cacheBytes []byte) ([]byte, error) {
+	// Try to unmarshal old cache.
+	var oldCache *nodeCache
+	if cacheBytes != nil {
+		oldCache = &nodeCache{}
+		if err := json.Unmarshal(cacheBytes, oldCache); err != nil {
+			oldCache = nil
+		} else if oldCache.Version != NODE_CACHE_VERSION {
+			oldCache = nil
+		}
+	}
+
+	// Create new cache object
+	newCache := nodeCache{Version: NODE_CACHE_VERSION}
+
 	// Acquire exclusive lock, since we'll be updating fields
 	node.mutex.Lock()
 
 	// Contact controller to get device description
-	nodeProtocolInfo, err := node.zWGetNodeProtocolInfo()
-	if err != nil {
-		node.mutex.Unlock()
-		return err
+	if oldCache == nil {
+		nodeProtocolInfo, err := node.zWGetNodeProtocolInfo()
+		if err != nil {
+			node.mutex.Unlock()
+			return nil, err
+		}
+		newCache.NodeProtocolInfo = *nodeProtocolInfo
+	} else {
+		newCache.NodeProtocolInfo = oldCache.NodeProtocolInfo
 	}
 
 	// Update fields
+	nodeProtocolInfo := newCache.NodeProtocolInfo
 	node.Listening = nodeProtocolInfo.Capabilities.Listening
 	node.DeviceClass.Basic = nodeProtocolInfo.DeviceClass.Basic
 	node.DeviceClass.Generic = nodeProtocolInfo.DeviceClass.Generic
@@ -116,18 +153,24 @@ func (node *Node) Refresh() error {
 	// If it's a listening device, we can issue more commands to it
 	if node.Listening {
 		node.mutex.Unlock()
+
+		// Create channel for receiving node info.
 		channel := make(chan *ApplicationUpdateData, 1)
-		node.AddApplicationUpdateCallbackChannel(channel)
-		defer node.RemoveApplicationUpdateCallbackChannel(channel)
-		node.mutex.Lock()
+		if oldCache == nil {
+			// Add channel to application callbacks.
+			node.AddApplicationUpdateCallbackChannel(channel)
+			defer node.RemoveApplicationUpdateCallbackChannel(channel)
 
-		// Fill supported command classes
-		if err := node.zWRequestNodeInfo(); err != nil {
+			node.mutex.Lock()
+			if err := node.zWRequestNodeInfo(); err != nil {
+				node.mutex.Unlock()
+				return nil, err
+			}
 			node.mutex.Unlock()
-			return err
+		} else {
+			// Send cache data to channel.
+			channel <- &oldCache.ApplicationUpdateData
 		}
-
-		node.mutex.Unlock()
 
 		end := time.Now().Add(responseTimeout)
 	outer:
@@ -136,7 +179,7 @@ func (node *Node) Refresh() error {
 			timeLeft := end.Sub(now)
 
 			if now.After(end) {
-				return fmt.Errorf("Timed out waiting for node info data")
+				return nil, fmt.Errorf("Timed out waiting for node info data")
 			}
 
 			select {
@@ -144,10 +187,12 @@ func (node *Node) Refresh() error {
 				if response.Status != message.ZWApplicationUpdateStateReceived {
 					continue
 				}
+				newCache.ApplicationUpdateData = *response
 
 				data := response.Data
 				if len(data) < 3 {
-					return fmt.Errorf("ZWApplicationUpdateStateReceived too short: %d < 3",
+					return nil, fmt.Errorf(
+						"ZWApplicationUpdateStateReceived too short: %d < 3",
 						len(response.Data))
 				}
 
@@ -184,20 +229,31 @@ func (node *Node) Refresh() error {
 				break outer
 
 			case <-time.After(timeLeft):
-				return fmt.Errorf("Timed out waiting for response")
+				return nil, fmt.Errorf("Timed out waiting for response")
 			}
 		}
 
 		// Check if we can get manufacturer information
 		if manuf := node.GetManufacturerSpecific(); manuf != nil {
-			manufacturerID, productType, productID, err := manuf.Get()
-			if err != nil {
-				return err
+			if oldCache == nil {
+				manufacturerID, productType, productID, err := manuf.Get()
+				if err != nil {
+					return nil, err
+				}
+
+				newCache.Manufacturer.ID = manufacturerID
+				newCache.Product.Type = productType
+				newCache.Product.ID = productID
+			} else {
+				newCache.Manufacturer.ID = oldCache.Manufacturer.ID
+				newCache.Product.Type = oldCache.Product.Type
+				newCache.Product.ID = oldCache.Product.ID
 			}
+
 			node.mutex.Lock()
-			node.Manufacturer.ID = manufacturerID
-			node.Product.Type = productType
-			node.Product.ID = productID
+			node.Manufacturer.ID = newCache.Manufacturer.ID
+			node.Product.Type = newCache.Product.Type
+			node.Product.ID = newCache.Product.ID
 			node.mutex.Unlock()
 		}
 	} else {
@@ -205,7 +261,12 @@ func (node *Node) Refresh() error {
 		node.mutex.Unlock()
 	}
 
-	return nil
+	cacheBytes, err := json.Marshal(newCache)
+	if err != nil {
+		return nil, err
+	}
+
+	return cacheBytes, nil
 }
 
 // RefreshWithIDs using the manufacturer information and local database

@@ -25,76 +25,76 @@ import (
 const testDevicePath = "/dev/tty.usbmodem1451"
 
 func TestApiOpenClose(t *testing.T) {
-	api := Network{DevicePath: testDevicePath}
+	net := Network{DevicePath: testDevicePath}
 
 	if testing.Short() {
 		t.Skipf("Skipping API test")
 	}
 
-	if err := api.Open(); err != nil {
+	if err := net.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 		t.FailNow()
 	}
 
 	defer func() {
-		if err := api.Close(); err != nil {
+		if err := net.Close(); err != nil {
 			t.Errorf("Expected nil error: %v", err)
 		}
 	}()
 
-	if err := api.Close(); err != nil {
+	if err := net.Close(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	}
 
-	if err := api.Open(); err != nil {
+	if err := net.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	}
 
-	if err := api.Open(); err != nil {
+	if err := net.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	}
 
-	if err := api.Close(); err != nil {
+	if err := net.Close(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 	}
 }
 
 func TestAPI(t *testing.T) {
-	api := Network{DevicePath: testDevicePath}
-	api.DebugLogging = false
+	net := Network{DevicePath: testDevicePath}
+	net.DebugLogging = false
 
 	if testing.Short() {
 		t.Skipf("Skipping API test")
 	}
 
-	if err := api.Open(); err != nil {
+	if err := net.Open(); err != nil {
 		t.Errorf("Expected nil error: %v", err)
 		t.FailNow()
 	}
 
 	defer func() {
-		if err := api.Close(); err != nil {
+		if err := net.Close(); err != nil {
 			t.Errorf("Expected nil error: %v", err)
 		}
 	}()
 
 	var err error
 
-	err = api.Initialize()
+	err = net.Initialize()
 	if err != nil {
 		t.Errorf("Expected nil error: %v", err)
 		t.FailNow()
 	}
 
-	nodes := api.GetNodes()
+	nodes := net.GetNodes()
 	for _, node := range nodes {
-		t.Logf("Refreshing node: %d", node.ID)
-		if err := node.Refresh(); err != nil {
+		t.Logf("Loading node: %d", node.ID)
+		if _, err := node.Load(nil); err != nil {
 			t.Errorf("Node: %d Expected nil error: %v", node.ID, err)
 		}
 	}
 
-	s := api.GetNode(14)
+	s := net.GetNode(14)
 	bs := s.GetBinarySwitch()
 	if bs != nil {
 		if err := bs.On(); err != nil {

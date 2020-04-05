@@ -43,7 +43,7 @@ func Example() {
 	// Iterate over nodes and refresh them, querying for more specific
 	// information about their supported operations
 	for _, n := range net.GetNodes() {
-		if err := n.Refresh(); err != nil {
+		if _, err := n.Load(nil); err != nil {
 			fmt.Printf("Node: %d failed to refresh: %v\n", n.ID, err)
 		} else {
 			fmt.Printf("Node: %+v\n", n)
